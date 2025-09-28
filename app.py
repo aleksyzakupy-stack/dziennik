@@ -7,8 +7,6 @@ import streamlit_authenticator as stauth
 # --- Autoryzacja ---
 names = ["Pacjent"]
 usernames = ["pacjent1"]
-passwords = ["haslo123"]  # ← здесь можно задать своё
-
 passwords = ["haslo123", "inneHaslo456"]
 hashed_passwords = stauth.Hasher(passwords).generate()
 
