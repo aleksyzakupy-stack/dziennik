@@ -2,35 +2,6 @@ import streamlit as st
 import pandas as pd
 import datetime
 import matplotlib.pyplot as plt
-import streamlit_authenticator as stauth
-
-# --- Autoryzacja ---
-names = ["Pacjent"]
-usernames = ["pacjent1"]
-passwords = ["haslo123", "inneHaslo456"]
-hashed_passwords = stauth.Hasher(passwords).generate()
-
-authenticator = stauth.Authenticate(
-    names,
-    usernames,
-    hashed_passwords,
-    "dziennik_cookie",  # identyfikator sesji
-    "abcdef",           # klucz losowy do podpisu cookie
-    cookie_expiry_days=1
-)
-
-name, authentication_status, username = authenticator.login("Login", "main")
-
-if authentication_status == False:
-    st.error("❌ Nieprawidłowy login lub hasło")
-if authentication_status == None:
-    st.warning("🔑 Wprowadź login i hasło")
-
-# --- Jeśli zalogowano ---
-if authentication_status:
-
-    authenticator.logout("Wyloguj", "sidebar")
-    st.sidebar.success(f"Zalogowano: {name}")
 
 CSV_FILE = "dziennik.csv"
 
