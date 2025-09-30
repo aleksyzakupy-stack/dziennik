@@ -7,6 +7,8 @@ from yaml.loader import SafeLoader
 import matplotlib.pyplot as plt
 import streamlit_authenticator as stauth
 
+st.set_page_config(page_title="Dziennik nastroju", layout="wide")
+
 # --- Plik użytkowników ---
 USERS_FILE = "users.yaml"
 
@@ -100,7 +102,6 @@ if authentication_status:
     IMPULSY = {"oż": "kompulsywne objadanie się", "su": "samouszkodzenia", "z": "zakupy kompulsywne", "h": "hazard", "s": "seks ryzykowny"}
 
     # --- Layout ---
-    st.set_page_config(page_title="Dziennik nastroju", layout="wide")
     st.title("📓 Dziennik nastroju i objawów")
 
     tab1, tab2, tab3 = st.tabs(["✍️ Formularz", "📑 Historia", "📈 Wykresy"])
