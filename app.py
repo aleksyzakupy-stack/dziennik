@@ -49,7 +49,7 @@ with st.sidebar.form("register_form"):
             st.sidebar.success("✅ Rejestracja udana! Możesz się zalogować.")
 
 # --- Logowanie ---
-name, authentication_status, username = authenticator.login("Login", "main")
+name, authentication_status, username = authenticator.login(form_name="Login", location="sidebar")
 
 if authentication_status == False:
     st.error("❌ Nieprawidłowy login lub hasło")
