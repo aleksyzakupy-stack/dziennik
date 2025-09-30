@@ -30,7 +30,7 @@ authenticator = stauth.Authenticate(
 # --- Rejestracja ---
 st.sidebar.subheader("🆕 Rejestracja")
 with st.sidebar.form("register_form"):
-    new_name = st.text_input("Imię i nazwisko")
+    new_name = st.text_input("Inicjały")
     new_username = st.text_input("Login")
     new_password = st.text_input("Hasło", type="password")
     reg_submitted = st.form_submit_button("Zarejestruj")
