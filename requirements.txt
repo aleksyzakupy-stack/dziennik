@@ -1,6 +1,6 @@
-streamlit
+streamlit==1.35.0
 pandas
 matplotlib
 pyyaml
-streamlit-authenticator
+streamlit-authenticator==0.2.2
 openpyxl
