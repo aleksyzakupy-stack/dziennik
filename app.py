@@ -200,5 +200,38 @@ if authentication_status:
             plt.xticks(rotation=45)
 
             st.pyplot(fig)
+            
+# --- Wykresy snu ---
+st.subheader("🌙 Sen")
+
+# konwersja czasu snu do godzin i obliczanie długości snu
+df["Zaśnięcie_dt"] = pd.to_datetime(df["Godzina zaśnięcia"], format="%H:%M", errors="coerce")
+df["Pobudka_dt"] = pd.to_datetime(df["Godzina wybudzenia"], format="%H:%M", errors="coerce")
+
+df["Godzina zaśnięcia (h)"] = df["Zaśnięcie_dt"].dt.hour + df["Zaśnięcie_dt"].dt.minute/60
+df["Godzina wybudzenia (h)"] = df["Pobudka_dt"].dt.hour + df["Pobudka_dt"].dt.minute/60
+df["Długość snu (h)"] = (df["Pobudka_dt"] - df["Zaśnięcie_dt"]).dt.total_seconds() / 3600
+
+fig, ax = plt.subplots()
+ax.plot(df["Data i czas"], df["Godzina zaśnięcia (h)"], marker="o", label="Zaśnięcie (godz.)")
+ax.plot(df["Data i czas"], df["Godzina wybudzenia (h)"], marker="o", label="Pobudka (godz.)")
+
+if "Liczba wybudzeń w nocy" in df:
+    ax.plot(df["Data i czas"], df["Liczba wybudzeń w nocy"], marker="x", label="Wybudzenia w nocy")
+
+if "Subiektywna jakość snu (0-10)" in df:
+    ax.plot(df["Data i czas"], df["Subiektywna jakość snu (0-10)"], marker="s", label="Jakość snu (0-10)")
+
+if "Długość snu (h)" in df:
+    ax.plot(df["Data i czas"], df["Długość snu (h)"], marker="d", label="Długość snu (h)")
+
+ax.set_ylabel("Wartości snu")
+ax.set_xlabel("Data")
+ax.legend()
+plt.xticks(rotation=45)
+
+st.pyplot(fig)
+
+        
         else:
             st.info("Brak danych do wizualizacji.")
