@@ -204,23 +204,157 @@ if authentication_status:
             plt.xticks(rotation=45)
 
             st.pyplot(fig)
+
+        # --- Wykresy snu ---
+st.subheader("🌙 Sen")
+
+# konwersja czasu snu do godzin i obliczanie długości snu
+df["Zaśnięcie_dt"] = pd.to_datetime(df["Godzina zaśnięcia"], format="%H:%M", errors="coerce")
+df["Pobudka_dt"] = pd.to_datetime(df["Godzina wybudzenia"], format="%H:%M", errors="coerce")
+
+df["Godzina zaśnięcia (h)"] = df["Zaśnięcie_dt"].dt.hour + df["Zaśnięcie_dt"].dt.minute/60
+df["Godzina wybudzenia (h)"] = df["Pobudka_dt"].dt.hour + df["Pobudka_dt"].dt.minute/60
+df["Długość snu (h)"] = (df["Pobudka_dt"] - df["Zaśnięcie_dt"]).dt.total_seconds() / 3600
+
+fig, ax = plt.subplots()
+ax.plot(df["Data i czas"], df["Godzina zaśnięcia (h)"], marker="o", label="Zaśnięcie (godz.)")
+ax.plot(df["Data i czas"], df["Godzina wybudzenia (h)"], marker="o", label="Pobudka (godz.)")
+
+if "Liczba wybudzeń w nocy" in df:
+    ax.plot(df["Data i czas"], df["Liczba wybudzeń w nocy"], marker="x", label="Wybudzenia w nocy")
+
+if "Subiektywna jakość snu (0-10)" in df:
+    ax.plot(df["Data i czas"], df["Subiektywna jakość snu (0-10)"], marker="s", label="Jakość snu (0-10)")
+
+if "Długość snu (h)" in df:
+    ax.plot(df["Data i czas"], df["Długość snu (h)"], marker="d", label="Długość snu (h)")
+
+ax.set_ylabel("Wartości snu")
+ax.set_xlabel("Data")
+ax.legend()
+plt.xticks(rotation=45)
+
+st.pyplot(fig)
+
         else:
             st.info("Brak danych do wizualizacji.")
 
     # --- TAB 4: Panel admina ---
-    if role == "admin" and extra:
-        with extra[0]:
-            st.subheader("👨‍⚕️ Panel admina – podgląd pacjentów")
+# --- TAB 4: Panel admina ---
+if role == "admin" and extra:
+    with extra[0]:
+        st.subheader("👨‍⚕️ Panel admina – dane pacjentów")
 
-            files = [f for f in os.listdir("data") if f.endswith(".csv")]
-            patients = [f.replace(".csv", "") for f in files]
+        files = [f for f in os.listdir("data") if f.endswith(".csv")]
+        patients = [f.replace(".csv", "") for f in files]
 
-            selected_user = st.selectbox("Wybierz pacjenta", patients)
-            if selected_user:
-                file_path = os.path.join("data", f"{selected_user}.csv")
-                if os.path.exists(file_path):
-                    df_patient = pd.read_csv(file_path)
+        selected_user = st.selectbox("Wybierz pacjenta", patients)
+
+        if selected_user:
+            file_path = os.path.join("data", f"{selected_user}.csv")
+            if os.path.exists(file_path):
+                df_patient = pd.read_csv(file_path)
+
+                if not df_patient.empty:
                     st.write(f"📄 Dane pacjenta: **{selected_user}**")
                     st.dataframe(df_patient, use_container_width=True)
+# --- Skrót: objawy + impulsy ---
+if not df_patient.empty:
+    st.markdown("### 📊 Objawy somatyczne i zachowania impulsywne")
+    table_summary = df_patient[["Data i czas", "Objawy somatyczne", "Zachowania impulsywne"]]
+    st.dataframe(table_summary, use_container_width=True)
+
+                    # --- Eksport ---
+                    st.markdown("### 📤 Eksport danych pacjenta")
+                    csv = df_patient.to_csv(index=False).encode("utf-8")
+                    st.download_button(
+                        "⬇️ Pobierz CSV",
+                        data=csv,
+                        file_name=f"{selected_user}_dziennik.csv",
+                        mime="text/csv"
+                    )
+
+                    try:
+                        import io, openpyxl
+                        buffer = io.BytesIO()
+                        df_patient.to_excel(buffer, index=False, engine="openpyxl")
+                        st.download_button(
+                            "⬇️ Pobierz XLSX",
+                            data=buffer.getvalue(),
+                            file_name=f"{selected_user}_dziennik.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                    except ImportError:
+                        st.info("📎 Eksport do XLSX wymaga pakietu `openpyxl`.")
+
+                    # --- Wykresy ---
+                    df_patient["Data i czas"] = pd.to_datetime(df_patient["Data i czas"])
+                    st.subheader("📈 Trendy pacjenta")
+
+                    fig, ax = plt.subplots()
+                    for col, label in [
+                        ("Nastrój (0-10)", "Nastrój"),
+                        ("Poziom lęku/napięcia (0-10)", "Lęk"),
+                        ("Energia/motywacja (0-10)", "Energia"),
+                        ("Apetyt (0-10)", "Apetyt")
+                    ]:
+                        if col in df_patient:
+                            ax.plot(df_patient["Data i czas"], df_patient[col], marker="o", label=label)
+
+                    low = df_patient[df_patient["Nastrój (0-10)"] < 3]
+                    if not low.empty:
+                        ax.scatter(low["Data i czas"], low["Nastrój (0-10)"], color="red", s=60, zorder=5, label="Bardzo niski nastrój")
+
+                    ax.set_ylabel("Poziom (0–10)")
+                    ax.set_xlabel("Data")
+                    ax.legend()
+                    plt.xticks(rotation=45)
+
+                    st.pyplot(fig)
+
+# --- Wykresy snu ---
+st.subheader("🌙 Sen pacjenta")
+
+# konwersja czasu i obliczanie długości snu
+df_patient["Zaśnięcie_dt"] = pd.to_datetime(df_patient["Godzina zaśnięcia"], format="%H:%M", errors="coerce")
+df_patient["Pobudka_dt"] = pd.to_datetime(df_patient["Godzina wybudzenia"], format="%H:%M", errors="coerce")
+
+df_patient["Godzina zaśnięcia (h)"] = df_patient["Zaśnięcie_dt"].dt.hour + df_patient["Zaśnięcie_dt"].dt.minute/60
+df_patient["Godzina wybudzenia (h)"] = df_patient["Pobudka_dt"].dt.hour + df_patient["Pobudka_dt"].dt.minute/60
+df_patient["Długość snu (h)"] = (df_patient["Pobudka_dt"] - df_patient["Zaśnięcie_dt"]).dt.total_seconds() / 3600
+
+# --- wykres snu ---
+fig, ax = plt.subplots()
+if "Godzina zaśnięcia (h)" in df_patient:
+    ax.plot(df_patient["Data i czas"], df_patient["Godzina zaśnięcia (h)"], marker="o", label="Zaśnięcie (godz.)")
+if "Godzina wybudzenia (h)" in df_patient:
+    ax.plot(df_patient["Data i czas"], df_patient["Godzina wybudzenia (h)"], marker="o", label="Pobudka (godz.)")
+if "Liczba wybudzeń w nocy" in df_patient:
+    ax.plot(df_patient["Data i czas"], df_patient["Liczba wybudzeń w nocy"], marker="x", label="Wybudzenia w nocy")
+if "Subiektywna jakość snu (0-10)" in df_patient:
+    ax.plot(df_patient["Data i czas"], df_patient["Subiektywna jakość snu (0-10)"], marker="s", label="Jakość snu (0-10)")
+if "Długość snu (h)" in df_patient:
+    ax.plot(df_patient["Data i czas"], df_patient["Długość snu (h)"], marker="d", label="Długość snu (h)")
+
+ax.set_ylabel("Parametry snu")
+ax.set_xlabel("Data")
+ax.legend()
+plt.xticks(rotation=45)
+
+st.pyplot(fig)
+
+# --- statystyki snu ---
+st.markdown("### 📊 Statystyki snu")
+avg_sleep = df_patient["Długość snu (h)"].mean(skipna=True)
+avg_wakeups = df_patient["Liczba wybudzeń w nocy"].mean(skipna=True)
+avg_quality = df_patient["Subiektywna jakość snu (0-10)"].mean(skipna=True)
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Średnia długość snu", f"{avg_sleep:.1f} h" if not pd.isna(avg_sleep) else "–")
+col2.metric("Średnia liczba wybudzeń", f"{avg_wakeups:.1f}" if not pd.isna(avg_wakeups) else "–")
+col3.metric("Średnia jakość snu", f"{avg_quality:.1f}/10" if not pd.isna(avg_quality) else "–")
+
+
+
                 else:
                     st.info("Brak danych dla tego pacjenta.")
