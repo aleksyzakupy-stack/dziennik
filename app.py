@@ -7,11 +7,11 @@ from yaml.loader import SafeLoader
 import matplotlib.pyplot as plt
 import streamlit_authenticator as stauth
 
-st.set_page_config(page_title="Dziennik nastroju", layout="wide")
+# --- Konfiguracja strony ---
+st.set_page_config(page_title="📓 Dziennik nastroju", layout="wide")
 
 # --- Plik użytkowników ---
 USERS_FILE = "users.yaml"
-
 if not os.path.exists(USERS_FILE):
     with open(USERS_FILE, "w") as f:
         yaml.dump({"credentials": {"usernames": {}}}, f)
@@ -28,31 +28,32 @@ authenticator = stauth.Authenticate(
 )
 
 # --- Rejestracja ---
-st.sidebar.subheader("🆕 Rejestracja")
-with st.sidebar.form("register_form"):
-    new_name = st.text_input("Inicjały")
-    new_username = st.text_input("Login")
-    new_password = st.text_input("Hasło", type="password")
-    reg_submitted = st.form_submit_button("Zarejestruj")
+if st.session_state.get("authentication_status") is None:
+    st.sidebar.subheader("🆕 Rejestracja")
+    with st.sidebar.form("register_form"):
+        new_name = st.text_input("Imię i nazwisko")
+        new_username = st.text_input("Login")
+        new_password = st.text_input("Hasło", type="password")
+        reg_submitted = st.form_submit_button("Zarejestruj")
 
-    if reg_submitted:
-        if new_username in config["credentials"]["usernames"]:
-            st.sidebar.error("❌ Taki login już istnieje")
-        elif not new_name or not new_username or not new_password:
-            st.sidebar.error("⚠️ Wszystkie pola są wymagane")
-        else:
-            hashed = stauth.Hasher([new_password]).generate()[0]
-            config["credentials"]["usernames"][new_username] = {
-                "name": new_name,
-                "password": hashed
-            }
-            with open(USERS_FILE, "w") as f:
-                yaml.dump(config, f)
-            st.sidebar.success("✅ Rejestracja udana! Możesz się zalogować.")
+        if reg_submitted:
+            if new_username in config["credentials"]["usernames"]:
+                st.sidebar.error("❌ Taki login już istnieje")
+            elif not new_name or not new_username or not new_password:
+                st.sidebar.error("⚠️ Wszystkie pola są wymagane")
+            else:
+                hashed = stauth.Hasher([new_password]).generate()[0]
+                config["credentials"]["usernames"][new_username] = {
+                    "name": new_name,
+                    "password": hashed,
+                    "role": "user"  # domyślnie zwykły pacjent
+                }
+                with open(USERS_FILE, "w") as f:
+                    yaml.dump(config, f)
+                st.sidebar.success("✅ Rejestracja udana! Możesz się zalogować.")
 
 # --- Logowanie ---
-name, authentication_status, username = authenticator.login("Login", "sidebar".strip())
-
+name, authentication_status, username = authenticator.login("Login", "sidebar")
 
 if authentication_status == False:
     st.error("❌ Nieprawidłowy login lub hasło")
@@ -62,10 +63,13 @@ if authentication_status == None:
 # --- Jeśli zalogowano ---
 if authentication_status:
 
-    authenticator.logout("Wyloguj", "sidebar")
+    authenticator.logout("🚪 Wyloguj", "sidebar")
     st.sidebar.success(f"Zalogowano: {name}")
 
-    # Plik z danymi tylko dla zalogowanego użytkownika
+    # --- Rola użytkownika ---
+    role = config["credentials"]["usernames"][username].get("role", "user")
+
+    # --- Plik CSV użytkownika ---
     os.makedirs("data", exist_ok=True)
     user_file = f"data/{username}.csv"
 
@@ -101,10 +105,12 @@ if authentication_status:
     AKTYWNOSCI = {"p": "praca", "n": "nauka", "d": "obowiązki domowe", "wf": "aktywność fizyczna"}
     IMPULSY = {"oż": "kompulsywne objadanie się", "su": "samouszkodzenia", "z": "zakupy kompulsywne", "h": "hazard", "s": "seks ryzykowny"}
 
-    # --- Layout ---
-    st.title("📓 Dziennik nastroju i objawów")
+    # --- Layout zakładek ---
+    tabs = ["✍️ Formularz", "📑 Historia", "📈 Wykresy"]
+    if role == "admin":
+        tabs.append("👨‍⚕️ Panel admina")
 
-    tab1, tab2, tab3 = st.tabs(["✍️ Formularz", "📑 Historia", "📈 Wykresy"])
+    tab1, tab2, tab3, *extra = st.tabs(tabs)
 
     # --- TAB 1: Formularz ---
     with tab1:
@@ -161,19 +167,6 @@ if authentication_status:
         csv = df.to_csv(index=False).encode("utf-8")
         st.download_button("⬇️ Pobierz CSV", data=csv, file_name=f"{username}_dziennik.csv", mime="text/csv")
 
-        try:
-            import io, openpyxl
-            buffer = io.BytesIO()
-            df.to_excel(buffer, index=False, engine="openpyxl")
-            st.download_button(
-                "⬇️ Pobierz XLSX",
-                data=buffer.getvalue(),
-                file_name=f"{username}_dziennik.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        except ImportError:
-            st.info("📎 Eksport do XLSX wymaga pakietu `openpyxl` (`pip install openpyxl`).")
-
     # --- TAB 3: Wykresy ---
     with tab3:
         if not df.empty:
@@ -202,3 +195,21 @@ if authentication_status:
             st.pyplot(fig)
         else:
             st.info("Brak danych do wizualizacji.")
+
+    # --- TAB 4: Panel admina ---
+    if role == "admin" and extra:
+        with extra[0]:
+            st.subheader("👨‍⚕️ Panel admina – podgląd pacjentów")
+
+            files = [f for f in os.listdir("data") if f.endswith(".csv")]
+            patients = [f.replace(".csv", "") for f in files]
+
+            selected_user = st.selectbox("Wybierz pacjenta", patients)
+            if selected_user:
+                file_path = os.path.join("data", f"{selected_user}.csv")
+                if os.path.exists(file_path):
+                    df_patient = pd.read_csv(file_path)
+                    st.write(f"📄 Dane pacjenta: **{selected_user}**")
+                    st.dataframe(df_patient, use_container_width=True)
+                else:
+                    st.info("Brak danych dla tego pacjenta.")
