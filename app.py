@@ -7,10 +7,10 @@ from yaml.loader import SafeLoader
 import matplotlib.pyplot as plt
 import streamlit_authenticator as stauth
 
-# --- Konfiguracja strony ---
+# --- Конфигурация страницы ---
 st.set_page_config(page_title="📓 Dziennik nastroju", layout="wide")
 
-# --- Plik użytkowników ---
+# --- Файл пользователей ---
 USERS_FILE = "users.yaml"
 if not os.path.exists(USERS_FILE):
     with open(USERS_FILE, "w") as f:
@@ -19,7 +19,18 @@ if not os.path.exists(USERS_FILE):
 with open(USERS_FILE) as f:
     config = yaml.load(f, Loader=SafeLoader)
 
-# --- Autoryzacja ---
+# --- Добавляем администратора вручную ---
+if "Kasper" not in config["credentials"]["usernames"]:
+    admin_hash = stauth.Hasher(["KlyxEanhybu1"]).generate()[0]
+    config["credentials"]["usernames"]["Kasper"] = {
+        "name": "Kasper Admin",
+        "password": admin_hash,
+        "role": "admin"
+    }
+    with open(USERS_FILE, "w") as f:
+        yaml.dump(config, f)
+
+# --- Авторизация ---
 authenticator = stauth.Authenticate(
     config['credentials'],
     "dziennik_cookie",
@@ -27,7 +38,7 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=1
 )
 
-# --- Rejestracja ---
+# --- Регистрация (только если не вошёл) ---
 if st.session_state.get("authentication_status") is None:
     st.sidebar.subheader("🆕 Rejestracja")
     with st.sidebar.form("register_form"):
@@ -46,13 +57,13 @@ if st.session_state.get("authentication_status") is None:
                 config["credentials"]["usernames"][new_username] = {
                     "name": new_name,
                     "password": hashed,
-                    "role": "user"  # domyślnie zwykły pacjent
+                    "role": "user"
                 }
                 with open(USERS_FILE, "w") as f:
                     yaml.dump(config, f)
                 st.sidebar.success("✅ Rejestracja udana! Możesz się zalogować.")
 
-# --- Logowanie ---
+# --- Логин ---
 name, authentication_status, username = authenticator.login("Login", "sidebar")
 
 if authentication_status == False:
@@ -60,16 +71,16 @@ if authentication_status == False:
 if authentication_status == None:
     st.warning("🔑 Wprowadź login i hasło")
 
-# --- Jeśli zalogowano ---
+# --- Если вошёл ---
 if authentication_status:
 
     authenticator.logout("🚪 Wyloguj", "sidebar")
     st.sidebar.success(f"Zalogowano: {name}")
 
-    # --- Rola użytkownika ---
+    # --- Роль пользователя ---
     role = config["credentials"]["usernames"][username].get("role", "user")
 
-    # --- Plik CSV użytkownika ---
+    # --- Файл CSV пользователя ---
     os.makedirs("data", exist_ok=True)
     user_file = f"data/{username}.csv"
 
@@ -94,7 +105,7 @@ if authentication_status:
     except FileNotFoundError:
         df = pd.DataFrame(columns=COLUMNS)
 
-    # --- Definicje checkboxów ---
+    # --- Определения чекбоксов ---
     OBJAWY = {
         "ks": "kołatanie serca", "d": "drżenie", "p": "nadmierne pocenie się",
         "bb": "bóle brzucha", "w": "wymioty", "ś": "ścisk w klatce/duszność",
@@ -105,7 +116,7 @@ if authentication_status:
     AKTYWNOSCI = {"p": "praca", "n": "nauka", "d": "obowiązki domowe", "wf": "aktywność fizyczna"}
     IMPULSY = {"oż": "kompulsywne objadanie się", "su": "samouszkodzenia", "z": "zakupy kompulsywne", "h": "hazard", "s": "seks ryzykowny"}
 
-    # --- Layout zakładek ---
+    # --- Layout вкладок ---
     tabs = ["✍️ Formularz", "📑 Historia", "📈 Wykresy"]
     if role == "admin":
         tabs.append("👨‍⚕️ Panel admina")
