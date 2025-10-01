@@ -10,7 +10,7 @@ import streamlit_authenticator as stauth
 # --- Конфигурация страницы ---
 st.set_page_config(page_title="📓 Dziennik nastroju", layout="wide")
 
-# --- Файл пользователей ---
+# --- Plik użytkowników ---
 USERS_FILE = "users.yaml"
 if not os.path.exists(USERS_FILE):
     with open(USERS_FILE, "w") as f:
@@ -19,18 +19,7 @@ if not os.path.exists(USERS_FILE):
 with open(USERS_FILE) as f:
     config = yaml.load(f, Loader=SafeLoader)
 
-# --- Добавляем администратора вручную ---
-if "Kasper" not in config["credentials"]["usernames"]:
-    admin_hash = stauth.Hasher(["KlyxEanhybu1"]).generate()[0]
-    config["credentials"]["usernames"]["Kasper"] = {
-        "name": "Kasper Admin",
-        "password": admin_hash,
-        "role": "admin"
-    }
-    with open(USERS_FILE, "w") as f:
-        yaml.dump(config, f)
-
-# --- Авторизация ---
+# --- Autoryzacja ---
 authenticator = stauth.Authenticate(
     config['credentials'],
     "dziennik_cookie",
@@ -38,7 +27,7 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=1
 )
 
-# --- Регистрация (только если не вошёл) ---
+# --- Rejestracja (tylko jeśli nie zalogowany) ---
 if st.session_state.get("authentication_status") is None:
     st.sidebar.subheader("🆕 Rejestracja")
     with st.sidebar.form("register_form"):
@@ -53,7 +42,7 @@ if st.session_state.get("authentication_status") is None:
             elif not new_name or not new_username or not new_password:
                 st.sidebar.error("⚠️ Wszystkie pola są wymagane")
             else:
-                hashed = stauth.Hasher([new_password]).generate()[0]
+                hashed = stauth.Hasher().generate([new_password])[0]
                 config["credentials"]["usernames"][new_username] = {
                     "name": new_name,
                     "password": hashed,
@@ -63,7 +52,7 @@ if st.session_state.get("authentication_status") is None:
                     yaml.dump(config, f)
                 st.sidebar.success("✅ Rejestracja udana! Możesz się zalogować.")
 
-# --- Логин ---
+# --- Logowanie ---
 name, authentication_status, username = authenticator.login("Login", "sidebar")
 
 if authentication_status == False:
@@ -71,16 +60,16 @@ if authentication_status == False:
 if authentication_status == None:
     st.warning("🔑 Wprowadź login i hasło")
 
-# --- Если вошёл ---
+# --- Jeśli zalogowano ---
 if authentication_status:
 
     authenticator.logout("🚪 Wyloguj", "sidebar")
     st.sidebar.success(f"Zalogowano: {name}")
 
-    # --- Роль пользователя ---
+    # --- Rola użytkownika ---
     role = config["credentials"]["usernames"][username].get("role", "user")
 
-    # --- Файл CSV пользователя ---
+    # --- Dane użytkownika ---
     os.makedirs("data", exist_ok=True)
     user_file = f"data/{username}.csv"
 
@@ -105,7 +94,7 @@ if authentication_status:
     except FileNotFoundError:
         df = pd.DataFrame(columns=COLUMNS)
 
-    # --- Определения чекбоксов ---
+    # --- Definicje checkboxów ---
     OBJAWY = {
         "ks": "kołatanie serca", "d": "drżenie", "p": "nadmierne pocenie się",
         "bb": "bóle brzucha", "w": "wymioty", "ś": "ścisk w klatce/duszność",
@@ -116,7 +105,7 @@ if authentication_status:
     AKTYWNOSCI = {"p": "praca", "n": "nauka", "d": "obowiązki domowe", "wf": "aktywność fizyczna"}
     IMPULSY = {"oż": "kompulsywne objadanie się", "su": "samouszkodzenia", "z": "zakupy kompulsywne", "h": "hazard", "s": "seks ryzykowny"}
 
-    # --- Layout вкладок ---
+    # --- Layout zakładek ---
     tabs = ["✍️ Formularz", "📑 Historia", "📈 Wykresy"]
     if role == "admin":
         tabs.append("👨‍⚕️ Panel admina")
@@ -205,156 +194,108 @@ if authentication_status:
 
             st.pyplot(fig)
 
-        # --- Wykresy snu ---
-st.subheader("🌙 Sen")
+            # --- Wykresy snu ---
+            st.subheader("🌙 Sen")
+            df["Zaśnięcie_dt"] = pd.to_datetime(df["Godzina zaśnięcia"], format="%H:%M", errors="coerce")
+            df["Pobudka_dt"] = pd.to_datetime(df["Godzina wybudzenia"], format="%H:%M", errors="coerce")
+            df["Godzina zaśnięcia (h)"] = df["Zaśnięcie_dt"].dt.hour + df["Zaśnięcie_dt"].dt.minute/60
+            df["Godzina wybudzenia (h)"] = df["Pobudka_dt"].dt.hour + df["Pobudka_dt"].dt.minute/60
+            df["Długość snu (h)"] = (df["Pobudka_dt"] - df["Zaśnięcie_dt"]).dt.total_seconds() / 3600
 
-# konwersja czasu snu do godzin i obliczanie długości snu
-df["Zaśnięcie_dt"] = pd.to_datetime(df["Godzina zaśnięcia"], format="%H:%M", errors="coerce")
-df["Pobudka_dt"] = pd.to_datetime(df["Godzina wybudzenia"], format="%H:%M", errors="coerce")
+            fig2, ax2 = plt.subplots()
+            ax2.plot(df["Data i czas"], df["Godzina zaśnięcia (h)"], marker="o", label="Zaśnięcie (godz.)")
+            ax2.plot(df["Data i czas"], df["Godzina wybudzenia (h)"], marker="o", label="Pobudka (godz.)")
+            ax2.plot(df["Data i czas"], df["Liczba wybudzeń w nocy"], marker="x", label="Wybudzenia w nocy")
+            ax2.plot(df["Data i czas"], df["Subiektywna jakość snu (0-10)"], marker="s", label="Jakość snu (0-10)")
+            ax2.plot(df["Data i czas"], df["Długość snu (h)"], marker="d", label="Długość snu (h)")
 
-df["Godzina zaśnięcia (h)"] = df["Zaśnięcie_dt"].dt.hour + df["Zaśnięcie_dt"].dt.minute/60
-df["Godzina wybudzenia (h)"] = df["Pobudka_dt"].dt.hour + df["Pobudka_dt"].dt.minute/60
-df["Długość snu (h)"] = (df["Pobudka_dt"] - df["Zaśnięcie_dt"]).dt.total_seconds() / 3600
-
-fig, ax = plt.subplots()
-ax.plot(df["Data i czas"], df["Godzina zaśnięcia (h)"], marker="o", label="Zaśnięcie (godz.)")
-ax.plot(df["Data i czas"], df["Godzina wybudzenia (h)"], marker="o", label="Pobudka (godz.)")
-
-if "Liczba wybudzeń w nocy" in df:
-    ax.plot(df["Data i czas"], df["Liczba wybudzeń w nocy"], marker="x", label="Wybudzenia w nocy")
-
-if "Subiektywna jakość snu (0-10)" in df:
-    ax.plot(df["Data i czas"], df["Subiektywna jakość snu (0-10)"], marker="s", label="Jakość snu (0-10)")
-
-if "Długość snu (h)" in df:
-    ax.plot(df["Data i czas"], df["Długość snu (h)"], marker="d", label="Długość snu (h)")
-
-ax.set_ylabel("Wartości snu")
-ax.set_xlabel("Data")
-ax.legend()
-plt.xticks(rotation=45)
-
-st.pyplot(fig)
-
+            ax2.set_ylabel("Parametry snu")
+            ax2.set_xlabel("Data")
+            ax2.legend()
+            plt.xticks(rotation=45)
+            st.pyplot(fig2)
         else:
             st.info("Brak danych do wizualizacji.")
 
     # --- TAB 4: Panel admina ---
-# --- TAB 4: Panel admina ---
-if role == "admin" and extra:
-    with extra[0]:
-        st.subheader("👨‍⚕️ Panel admina – dane pacjentów")
+    if role == "admin" and extra:
+        with extra[0]:
+            st.subheader("👨‍⚕️ Panel admina – dane pacjentów")
 
-        files = [f for f in os.listdir("data") if f.endswith(".csv")]
-        patients = [f.replace(".csv", "") for f in files]
+            files = [f for f in os.listdir("data") if f.endswith(".csv")]
+            patients = [f.replace(".csv", "") for f in files]
 
-        selected_user = st.selectbox("Wybierz pacjenta", patients)
+            selected_user = st.selectbox("Wybierz pacjenta", patients)
+            if selected_user:
+                file_path = os.path.join("data", f"{selected_user}.csv")
+                if os.path.exists(file_path):
+                    df_patient = pd.read_csv(file_path)
 
-        if selected_user:
-            file_path = os.path.join("data", f"{selected_user}.csv")
-            if os.path.exists(file_path):
-                df_patient = pd.read_csv(file_path)
+                    if not df_patient.empty:
+                        st.write(f"📄 Dane pacjenta: **{selected_user}**")
+                        st.dataframe(df_patient, use_container_width=True)
 
-                if not df_patient.empty:
-                    st.write(f"📄 Dane pacjenta: **{selected_user}**")
-                    st.dataframe(df_patient, use_container_width=True)
-# --- Skrót: objawy + impulsy ---
-if not df_patient.empty:
-    st.markdown("### 📊 Objawy somatyczne i zachowania impulsywne")
-    table_summary = df_patient[["Data i czas", "Objawy somatyczne", "Zachowania impulsywne"]]
-    st.dataframe(table_summary, use_container_width=True)
+                        st.markdown("### 📊 Objawy i impulsy")
+                        table_summary = df_patient[["Data i czas", "Objawy somatyczne", "Zachowania impulsywne"]]
+                        st.dataframe(table_summary, use_container_width=True)
 
-                    # --- Eksport ---
-                    st.markdown("### 📤 Eksport danych pacjenta")
-                    csv = df_patient.to_csv(index=False).encode("utf-8")
-                    st.download_button(
-                        "⬇️ Pobierz CSV",
-                        data=csv,
-                        file_name=f"{selected_user}_dziennik.csv",
-                        mime="text/csv"
-                    )
+                        # --- Eksport ---
+                        st.markdown("### 📤 Eksport danych pacjenta")
+                        csv = df_patient.to_csv(index=False).encode("utf-8")
+                        st.download_button("⬇️ Pobierz CSV", data=csv, file_name=f"{selected_user}_dziennik.csv", mime="text/csv")
 
-                    try:
-                        import io, openpyxl
-                        buffer = io.BytesIO()
-                        df_patient.to_excel(buffer, index=False, engine="openpyxl")
-                        st.download_button(
-                            "⬇️ Pobierz XLSX",
-                            data=buffer.getvalue(),
-                            file_name=f"{selected_user}_dziennik.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    except ImportError:
-                        st.info("📎 Eksport do XLSX wymaga pakietu `openpyxl`.")
+                        # --- Wykresy ---
+                        df_patient["Data i czas"] = pd.to_datetime(df_patient["Data i czas"])
+                        st.subheader("📈 Trendy pacjenta")
 
-                    # --- Wykresy ---
-                    df_patient["Data i czas"] = pd.to_datetime(df_patient["Data i czas"])
-                    st.subheader("📈 Trendy pacjenta")
+                        fig, ax = plt.subplots()
+                        for col, label in [
+                            ("Nastrój (0-10)", "Nastrój"),
+                            ("Poziom lęku/napięcia (0-10)", "Lęk"),
+                            ("Energia/motywacja (0-10)", "Energia"),
+                            ("Apetyt (0-10)", "Apetyt")
+                        ]:
+                            if col in df_patient:
+                                ax.plot(df_patient["Data i czas"], df_patient[col], marker="o", label=label)
 
-                    fig, ax = plt.subplots()
-                    for col, label in [
-                        ("Nastrój (0-10)", "Nastrój"),
-                        ("Poziom lęku/napięcia (0-10)", "Lęk"),
-                        ("Energia/motywacja (0-10)", "Energia"),
-                        ("Apetyt (0-10)", "Apetyt")
-                    ]:
-                        if col in df_patient:
-                            ax.plot(df_patient["Data i czas"], df_patient[col], marker="o", label=label)
+                        low = df_patient[df_patient["Nastrój (0-10)"] < 3]
+                        if not low.empty:
+                            ax.scatter(low["Data i czas"], low["Nastrój (0-10)"], color="red", s=60, zorder=5, label="Bardzo niski nastrój")
 
-                    low = df_patient[df_patient["Nastrój (0-10)"] < 3]
-                    if not low.empty:
-                        ax.scatter(low["Data i czas"], low["Nastrój (0-10)"], color="red", s=60, zorder=5, label="Bardzo niski nastrój")
+                        ax.set_ylabel("Poziom (0–10)")
+                        ax.set_xlabel("Data")
+                        ax.legend()
+                        plt.xticks(rotation=45)
+                        st.pyplot(fig)
 
-                    ax.set_ylabel("Poziom (0–10)")
-                    ax.set_xlabel("Data")
-                    ax.legend()
-                    plt.xticks(rotation=45)
+                        # --- Wykresy snu ---
+                        st.subheader("🌙 Sen pacjenta")
+                        df_patient["Zaśnięcie_dt"] = pd.to_datetime(df_patient["Godzina zaśnięcia"], format="%H:%M", errors="coerce")
+                        df_patient["Pobudka_dt"] = pd.to_datetime(df_patient["Godzina wybudzenia"], format="%H:%M", errors="coerce")
+                        df_patient["Godzina zaśnięcia (h)"] = df_patient["Zaśnięcie_dt"].dt.hour + df_patient["Zaśnięcie_dt"].dt.minute/60
+                        df_patient["Godzina wybudzenia (h)"] = df_patient["Pobudka_dt"].dt.hour + df_patient["Pobudka_dt"].dt.minute/60
+                        df_patient["Długość snu (h)"] = (df_patient["Pobudka_dt"] - df_patient["Zaśnięcie_dt"]).dt.total_seconds() / 3600
 
-                    st.pyplot(fig)
+                        fig2, ax2 = plt.subplots()
+                        ax2.plot(df_patient["Data i czas"], df_patient["Godzina zaśnięcia (h)"], marker="o", label="Zaśnięcie (godz.)")
+                        ax2.plot(df_patient["Data i czas"], df_patient["Godzina wybudzenia (h)"], marker="o", label="Pobudka (godz.)")
+                        ax2.plot(df_patient["Data i czas"], df_patient["Liczba wybudzeń w nocy"], marker="x", label="Wybudzenia w nocy")
+                        ax2.plot(df_patient["Data i czas"], df_patient["Subiektywna jakość snu (0-10)"], marker="s", label="Jakość snu (0-10)")
+                        ax2.plot(df_patient["Data i czas"], df_patient["Długość snu (h)"], marker="d", label="Długość snu (h)")
 
-# --- Wykresy snu ---
-st.subheader("🌙 Sen pacjenta")
+                        ax2.set_ylabel("Parametry snu")
+                        ax2.set_xlabel("Data")
+                        ax2.legend()
+                        plt.xticks(rotation=45)
+                        st.pyplot(fig2)
 
-# konwersja czasu i obliczanie długości snu
-df_patient["Zaśnięcie_dt"] = pd.to_datetime(df_patient["Godzina zaśnięcia"], format="%H:%M", errors="coerce")
-df_patient["Pobudka_dt"] = pd.to_datetime(df_patient["Godzina wybudzenia"], format="%H:%M", errors="coerce")
+                        # --- Statystyki snu ---
+                        st.markdown("### 📊 Statystyki snu")
+                        avg_sleep = df_patient["Długość snu (h)"].mean(skipna=True)
+                        avg_wakeups = df_patient["Liczba wybudzeń w nocy"].mean(skipna=True)
+                        avg_quality = df_patient["Subiektywna jakość snu (0-10)"].mean(skipna=True)
 
-df_patient["Godzina zaśnięcia (h)"] = df_patient["Zaśnięcie_dt"].dt.hour + df_patient["Zaśnięcie_dt"].dt.minute/60
-df_patient["Godzina wybudzenia (h)"] = df_patient["Pobudka_dt"].dt.hour + df_patient["Pobudka_dt"].dt.minute/60
-df_patient["Długość snu (h)"] = (df_patient["Pobudka_dt"] - df_patient["Zaśnięcie_dt"]).dt.total_seconds() / 3600
-
-# --- wykres snu ---
-fig, ax = plt.subplots()
-if "Godzina zaśnięcia (h)" in df_patient:
-    ax.plot(df_patient["Data i czas"], df_patient["Godzina zaśnięcia (h)"], marker="o", label="Zaśnięcie (godz.)")
-if "Godzina wybudzenia (h)" in df_patient:
-    ax.plot(df_patient["Data i czas"], df_patient["Godzina wybudzenia (h)"], marker="o", label="Pobudka (godz.)")
-if "Liczba wybudzeń w nocy" in df_patient:
-    ax.plot(df_patient["Data i czas"], df_patient["Liczba wybudzeń w nocy"], marker="x", label="Wybudzenia w nocy")
-if "Subiektywna jakość snu (0-10)" in df_patient:
-    ax.plot(df_patient["Data i czas"], df_patient["Subiektywna jakość snu (0-10)"], marker="s", label="Jakość snu (0-10)")
-if "Długość snu (h)" in df_patient:
-    ax.plot(df_patient["Data i czas"], df_patient["Długość snu (h)"], marker="d", label="Długość snu (h)")
-
-ax.set_ylabel("Parametry snu")
-ax.set_xlabel("Data")
-ax.legend()
-plt.xticks(rotation=45)
-
-st.pyplot(fig)
-
-# --- statystyki snu ---
-st.markdown("### 📊 Statystyki snu")
-avg_sleep = df_patient["Długość snu (h)"].mean(skipna=True)
-avg_wakeups = df_patient["Liczba wybudzeń w nocy"].mean(skipna=True)
-avg_quality = df_patient["Subiektywna jakość snu (0-10)"].mean(skipna=True)
-
-col1, col2, col3 = st.columns(3)
-col1.metric("Średnia długość snu", f"{avg_sleep:.1f} h" if not pd.isna(avg_sleep) else "–")
-col2.metric("Średnia liczba wybudzeń", f"{avg_wakeups:.1f}" if not pd.isna(avg_wakeups) else "–")
-col3.metric("Średnia jakość snu", f"{avg_quality:.1f}/10" if not pd.isna(avg_quality) else "–")
-
-
-
-                else:
-                    st.info("Brak danych dla tego pacjenta.")
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Średnia długość snu", f"{avg_sleep:.1f} h" if not pd.isna(avg_sleep) else "–")
+                        col2.metric("Średnia liczba wybudzeń", f"{avg_wakeups:.1f}" if not pd.isna(avg_wakeups) else "–")
+                        col3.metric("Średnia jakość snu", f"{avg_quality:.1f}/10" if not pd.isna(avg_quality) else "–")
