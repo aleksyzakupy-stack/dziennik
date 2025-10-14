@@ -1,0 +1,6 @@
+credentials:
+  usernames:
+    Kasper:
+      name: "Lek. Aleksy Kasperowicz"
+      password: "$2b$12$ei/CshYLjrjCx5xp0vKZ1.saL2avwM2mel1ySKKrxXjAJy6C3sEQC"
+      role: "admin"
