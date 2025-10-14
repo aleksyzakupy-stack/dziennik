@@ -19,16 +19,30 @@ if not os.path.exists(USERS_FILE):
 with open(USERS_FILE) as f:
     config = yaml.load(f, Loader=SafeLoader)
 
-# --- Добавляем администратора вручную ---
-if "Kasper" not in config["credentials"]["usernames"]:
-    admin_hash = stauth.Hasher(["KlyxEanhybu1"]).generate()[0]
-    config["credentials"]["usernames"]["Kasper"] = {
-        "name": "Kasper Admin",
-        "password": admin_hash,
-        "role": "admin"
-    }
-    with open(USERS_FILE, "w") as f:
-        yaml.dump(config, f)
+
+def get_secret(key: str):
+    """Return a secret value from Streamlit config or environment variables."""
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.getenv(key)
+
+
+# --- Добавляем администратора из секретов/zmiennych środowiskowych ---
+admin_username = get_secret("ADMIN_USERNAME")
+admin_password = get_secret("ADMIN_PASSWORD")
+admin_display_name = get_secret("ADMIN_DISPLAY_NAME")
+
+if admin_username and admin_password:
+    if admin_username not in config["credentials"]["usernames"]:
+        admin_hash = stauth.Hasher([admin_password]).generate()[0]
+        config["credentials"]["usernames"][admin_username] = {
+            "name": admin_display_name or admin_username,
+            "password": admin_hash,
+            "role": "admin"
+        }
+        with open(USERS_FILE, "w") as f:
+            yaml.dump(config, f)
 
 # --- Авторизация ---
 authenticator = stauth.Authenticate(
