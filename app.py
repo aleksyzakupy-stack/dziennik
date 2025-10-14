@@ -101,6 +101,7 @@ authenticator = stauth.Authenticate(
 st.session_state.setdefault("authentication_status", None)
 st.session_state.setdefault("name", None)
 st.session_state.setdefault("username", None)
+st.session_state.setdefault("logout", False)
 
 # --- Логин/регистрация ---
 if st.session_state.get("authentication_status") is not True:
@@ -127,7 +128,7 @@ if st.session_state.get("authentication_status") is not True:
                     "username": username
                 }
             )
-            st.experimental_rerun()
+            st.rerun()
         elif authentication_status is False:
             st.error("❌ Nieprawidłowy login lub hasło")
         else:
@@ -162,7 +163,7 @@ if st.session_state.get("authentication_status") is not True:
                         "auto_login_message": "✅ Rejestracja udana! Zalogowano automatycznie."
                     }
                 )
-                st.experimental_rerun()
+                st.rerun()
 
 # --- Aktualne wartości z sesji ---
 authentication_status = st.session_state.get("authentication_status")
@@ -176,11 +177,53 @@ if authentication_status:
     if auto_message:
         st.success(auto_message)
 
-    authenticator.logout("🚪 Wyloguj", "sidebar")
+    cookie_manager = getattr(authenticator, "cookie_manager", None)
+    cookie_name = getattr(authenticator, "cookie_name", None)
+    cookies_available = {}
+    if cookie_manager is not None:
+        getter = getattr(cookie_manager, "get_all", None)
+        if callable(getter):
+            try:
+                cookies_available = getter() or {}
+            except Exception:
+                cookies_available = {}
+        if not cookies_available and hasattr(cookie_manager, "cookies"):
+            cookies_available = getattr(cookie_manager, "cookies", {})
+
+    if cookie_name and cookie_name in cookies_available:
+        try:
+            authenticator.logout("🚪 Wyloguj", "sidebar")
+        except KeyError:
+            cookies_available.pop(cookie_name, None)
+            if cookie_manager is not None and hasattr(cookie_manager, "cookies"):
+                cookie_manager.cookies.pop(cookie_name, None)
+            st.session_state["authentication_status"] = None
+            st.session_state["name"] = None
+            st.session_state["username"] = None
+            st.session_state["logout"] = True
+            st.session_state.pop("auto_login_message", None)
+            st.rerun()
+    else:
+        if st.sidebar.button("🚪 Wyloguj", key="fallback_logout"):
+            st.session_state["authentication_status"] = None
+            st.session_state["name"] = None
+            st.session_state["username"] = None
+            st.session_state["logout"] = True
+            st.session_state.pop("auto_login_message", None)
+            st.rerun()
+
     st.sidebar.success(f"Zalogowano: {name}")
 
     # --- Роль пользователя ---
-    role = config["credentials"]["usernames"][username].get("role", "user")
+    user_record = config["credentials"]["usernames"].get(username)
+    if not user_record:
+        st.error("Nie znaleziono danych użytkownika. Prosimy zalogować się ponownie.")
+        st.session_state["authentication_status"] = None
+        st.session_state["name"] = None
+        st.session_state["username"] = None
+        st.session_state["logout"] = True
+        st.rerun()
+    role = user_record.get("role", "user")
 
     # --- Файл CSV пользователя ---
     os.makedirs("data", exist_ok=True)
@@ -451,13 +494,6 @@ if authentication_status:
                 render_counts("Wykonane aktywności", prepare_counts(df_filtered["Wykonane aktywności"]), col2)
                 render_counts("Zachowania impulsywne", prepare_counts(df_filtered["Zachowania impulsywne"]), col3)
 
-            # --- Statystyki aktywności i objawów ---
-            st.subheader("📊 Przegląd aktywności i objawów")
-            col1, col2, col3 = st.columns(3)
-            render_counts("Objawy somatyczne", prepare_counts(df["Objawy somatyczne"]), col1)
-            render_counts("Wykonane aktywności", prepare_counts(df["Wykonane aktywności"]), col2)
-            render_counts("Zachowania impulsywne", prepare_counts(df["Zachowania impulsywne"]), col3)
-
         else:
             st.info("Brak danych do wizualizacji.")
 
@@ -700,24 +736,6 @@ if authentication_status:
                                 prepare_counts(df_patient_filtered["Zachowania impulsywne"]),
                                 c3,
                             )
-
-                        st.markdown("### 📋 Aktywności i objawy")
-                        c1, c2, c3 = st.columns(3)
-                        render_counts(
-                            "Objawy somatyczne",
-                            prepare_counts(df_patient["Objawy somatyczne"]),
-                            c1,
-                        )
-                        render_counts(
-                            "Wykonane aktywności",
-                            prepare_counts(df_patient["Wykonane aktywności"]),
-                            c2,
-                        )
-                        render_counts(
-                            "Zachowania impulsywne",
-                            prepare_counts(df_patient["Zachowania impulsywne"]),
-                            c3,
-                        )
 
 
 
