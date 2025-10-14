@@ -15,79 +15,37 @@ st.set_page_config(page_title="📓 Dziennik nastroju", layout="wide")
 
 # --- Файл пользователей ---
 USERS_FILE = "users.yaml"
-DEFAULT_ADMIN_USERNAME = "Kasper"
-DEFAULT_ADMIN_NAME = "Lek. Aleksy Kasperowicz"
-DEFAULT_ADMIN_HASH = "$2b$12$ei/CshYLjrjCx5xp0vKZ1.saL2avwM2mel1ySKKrxXjAJy6C3sEQC"
+if not os.path.exists(USERS_FILE):
+    with open(USERS_FILE, "w") as f:
+        yaml.dump({"credentials": {"usernames": {}}}, f)
+
+with open(USERS_FILE) as f:
+    config = yaml.load(f, Loader=SafeLoader)
 
 
-def load_users_config() -> Dict[str, Any]:
-    """Ensure the users file exists and return its configuration."""
-
-    def _load_file() -> Dict[str, Any]:
-        if not os.path.exists(USERS_FILE):
-            return {"credentials": {"usernames": {}}}
-        with open(USERS_FILE) as fh:
-            data = yaml.load(fh, Loader=SafeLoader) or {}
-        return data
-
-    config_data: Dict[str, Any] = _load_file()
-    credentials: Dict[str, Any] = config_data.setdefault("credentials", {}).setdefault("usernames", {})
-
-    def get_secret(key: str):
-        try:
-            return st.secrets[key]
-        except Exception:
-            return os.getenv(key)
-
-    admin_username = get_secret("ADMIN_USERNAME")
-    admin_password = get_secret("ADMIN_PASSWORD")
-    admin_display_name = get_secret("ADMIN_DISPLAY_NAME")
-
-    updated = False
-
-    if admin_username and admin_password:
-        entry = credentials.setdefault(admin_username, {})
-        stored_hash = entry.get("password")
-        if (
-            stored_hash is None
-            or not bcrypt.checkpw(admin_password.encode(), stored_hash.encode())
-        ):
-            entry["password"] = stauth.Hasher([admin_password]).generate()[0]
-            updated = True
-        entry_name = admin_display_name or entry.get("name") or admin_username
-        if entry.get("name") != entry_name:
-            entry["name"] = entry_name
-            updated = True
-        if entry.get("role") != "admin":
-            entry["role"] = "admin"
-            updated = True
-    else:
-        entry = credentials.setdefault(
-            DEFAULT_ADMIN_USERNAME,
-            {
-                "name": DEFAULT_ADMIN_NAME,
-                "password": DEFAULT_ADMIN_HASH,
-                "role": "admin",
-            },
-        )
-        if entry.get("password") is None:
-            entry["password"] = DEFAULT_ADMIN_HASH
-            updated = True
-        if entry.get("role") != "admin":
-            entry["role"] = "admin"
-            updated = True
-        if not entry.get("name"):
-            entry["name"] = DEFAULT_ADMIN_NAME
-            updated = True
-
-    if updated or not os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "w") as fh:
-            yaml.dump(config_data, fh)
-
-    return config_data
+def get_secret(key: str):
+    """Return a secret value from Streamlit config or environment variables."""
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.getenv(key)
 
 
-config = load_users_config()
+# --- Добавляем администратора из секретов/zmiennych środowiskowych ---
+admin_username = get_secret("ADMIN_USERNAME")
+admin_password = get_secret("ADMIN_PASSWORD")
+admin_display_name = get_secret("ADMIN_DISPLAY_NAME")
+
+if admin_username and admin_password:
+    if admin_username not in config["credentials"]["usernames"]:
+        admin_hash = stauth.Hasher([admin_password]).generate()[0]
+        config["credentials"]["usernames"][admin_username] = {
+            "name": admin_display_name or admin_username,
+            "password": admin_hash,
+            "role": "admin"
+        }
+        with open(USERS_FILE, "w") as f:
+            yaml.dump(config, f)
 
 # --- Авторизация ---
 authenticator = stauth.Authenticate(
