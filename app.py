@@ -251,6 +251,9 @@ if authentication_status:
     except FileNotFoundError:
         df = pd.DataFrame(columns=COLUMNS)
 
+    def ensure_datetime(series: pd.Series) -> pd.Series:
+        return pd.to_datetime(series, errors="coerce")
+
     # --- Определения чекбоксов ---
     OBJAWY = {
         "ks": "kołatanie serca", "d": "drżenie", "p": "nadmierne pocenie się",
@@ -288,7 +291,7 @@ if authentication_status:
     def select_date_range(df_time: pd.DataFrame, key_prefix: str):
         if df_time.empty or "Data i czas" not in df_time:
             return None
-        timestamps = pd.to_datetime(df_time["Data i czas"], errors="coerce")
+        timestamps = ensure_datetime(df_time["Data i czas"])
         timestamps = timestamps.dropna()
         if timestamps.empty:
             return None
@@ -316,7 +319,7 @@ if authentication_status:
         if start_date is None or end_date is None or df_time.empty:
             return df_time
         filtered = df_time.copy()
-        filtered["Data i czas"] = pd.to_datetime(filtered["Data i czas"], errors="coerce")
+        filtered["Data i czas"] = ensure_datetime(filtered["Data i czas"])
         mask = filtered["Data i czas"].dt.date.between(start_date, end_date)
         return filtered.loc[mask]
 
@@ -324,7 +327,7 @@ if authentication_status:
         if column not in df_time or df_time.empty:
             return pd.Series(dtype="int64")
         working = df_time[["Data i czas", column]].copy()
-        working["Data i czas"] = pd.to_datetime(working["Data i czas"], errors="coerce")
+        working["Data i czas"] = ensure_datetime(working["Data i czas"])
         working = working.dropna(subset=["Data i czas"])
         if working.empty:
             return pd.Series(dtype="int64")
@@ -356,7 +359,7 @@ if authentication_status:
         if df_time.empty or "Data i czas" not in df_time:
             return pd.DataFrame()
         working = df_time.copy()
-        working["Data i czas"] = pd.to_datetime(working["Data i czas"], errors="coerce")
+        working["Data i czas"] = ensure_datetime(working["Data i czas"])
         working = working.dropna(subset=["Data i czas"])
         if working.empty:
             return pd.DataFrame()
@@ -378,6 +381,19 @@ if authentication_status:
         if "Długość snu (h)" in working:
             working.loc[working["Długość snu (h)"] < 0, "Długość snu (h)"] += 24
         return working
+
+    def get_numeric_series(df_input: pd.DataFrame, column: str) -> pd.Series:
+        if column not in df_input:
+            return pd.Series(dtype="float64")
+        return pd.to_numeric(df_input[column], errors="coerce")
+
+    def clear_pending_entry():
+        for key in [
+            "pending_entry",
+            "pending_entry_date",
+            "pending_entry_user",
+        ]:
+            st.session_state.pop(key, None)
 
     if role == "admin":
         st.title("👨‍⚕️ Panel admina")
@@ -431,6 +447,53 @@ if authentication_status:
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 )
 
+                            st.markdown("### 🗑 Usuń wpis pacjenta")
+                            if not df_patient.empty:
+                                admin_timestamps = (
+                                    ensure_datetime(df_patient["Data i czas"])
+                                    if "Data i czas" in df_patient
+                                    else pd.Series(
+                                        pd.NaT,
+                                        index=df_patient.index,
+                                        dtype="datetime64[ns]",
+                                    )
+                                )
+
+                                def format_admin_entry(idx: int) -> str:
+                                    ts = admin_timestamps.loc[idx]
+                                    ts_display = (
+                                        ts.strftime("%Y-%m-%d %H:%M")
+                                        if not pd.isna(ts)
+                                        else "Brak daty"
+                                    )
+                                    mood_display = (
+                                        df_patient.at[idx, "Nastrój (0-10)"]
+                                        if "Nastrój (0-10)" in df_patient
+                                        else "–"
+                                    )
+                                    return f"{ts_display} · Nastrój: {mood_display}"
+
+                                entry_to_delete = st.selectbox(
+                                    "Wybierz wpis do usunięcia",
+                                    options=list(df_patient.index),
+                                    format_func=format_admin_entry,
+                                    key=f"admin_delete_option_{selected_user_range}",
+                                )
+
+                                if st.button(
+                                    "🗑 Usuń wybrany wpis",
+                                    key=f"admin_delete_button_{selected_user_range}",
+                                ):
+                                    updated_df = (
+                                        df_patient.drop(index=entry_to_delete)
+                                        .reset_index(drop=True)
+                                    )
+                                    updated_df.to_csv(file_path, index=False)
+                                    st.success("Wpis został usunięty.")
+                                    st.rerun()
+                            else:
+                                st.info("Brak wpisów do usunięcia.")
+
                             st.markdown("### 📊 Najczęstsze wpisy (całość)")
                             col_all1, col_all2, col_all3 = st.columns(3)
                             render_counts(
@@ -450,8 +513,8 @@ if authentication_status:
                             )
 
                             df_patient_time = df_patient.copy()
-                            df_patient_time["Data i czas"] = pd.to_datetime(
-                                df_patient_time["Data i czas"], errors="coerce"
+                            df_patient_time["Data i czas"] = ensure_datetime(
+                                df_patient_time["Data i czas"]
                             )
                             df_patient_time = df_patient_time.dropna(subset=["Data i czas"])
 
@@ -560,17 +623,17 @@ if authentication_status:
                                         st.pyplot(fig)
 
                                         st.markdown("### 📊 Statystyki snu")
-                                        numeric_sleep = pd.to_numeric(
-                                            df_patient_sleep["Długość snu (h)"],
-                                            errors="coerce",
+                                        numeric_sleep = get_numeric_series(
+                                            df_patient_sleep,
+                                            "Długość snu (h)",
                                         )
-                                        numeric_wakeups = pd.to_numeric(
-                                            df_patient_sleep["Liczba wybudzeń w nocy"],
-                                            errors="coerce",
+                                        numeric_wakeups = get_numeric_series(
+                                            df_patient_sleep,
+                                            "Liczba wybudzeń w nocy",
                                         )
-                                        numeric_quality = pd.to_numeric(
-                                            df_patient_sleep["Subiektywna jakość snu (0-10)"],
-                                            errors="coerce",
+                                        numeric_quality = get_numeric_series(
+                                            df_patient_sleep,
+                                            "Subiektywna jakość snu (0-10)",
                                         )
 
                                         avg_sleep = numeric_sleep.dropna().mean()
@@ -603,20 +666,31 @@ if authentication_status:
                                         )
 
                                         st.markdown("### 📋 Dane snu (wybrany zakres)")
-                                        sleep_table = df_patient_sleep[
-                                            [
-                                                "Data i czas",
-                                                "Godzina zaśnięcia",
-                                                "Godzina wybudzenia",
-                                                "Liczba wybudzeń w nocy",
-                                                "Subiektywna jakość snu (0-10)",
-                                                "Długość snu (h)",
-                                            ]
+                                        sleep_columns = [
+                                            "Data i czas",
+                                            "Godzina zaśnięcia",
+                                            "Godzina wybudzenia",
+                                            "Liczba wybudzeń w nocy",
+                                            "Subiektywna jakość snu (0-10)",
+                                            "Długość snu (h)",
                                         ]
-                                        st.dataframe(
-                                            sleep_table,
-                                            use_container_width=True,
-                                        )
+                                        available_sleep_columns = [
+                                            column
+                                            for column in sleep_columns
+                                            if column in df_patient_sleep
+                                        ]
+                                        if available_sleep_columns:
+                                            sleep_table = df_patient_sleep[
+                                                available_sleep_columns
+                                            ]
+                                            st.dataframe(
+                                                sleep_table,
+                                                use_container_width=True,
+                                            )
+                                        else:
+                                            st.info(
+                                                "Brak szczegółowych danych o śnie w wybranym okresie."
+                                            )
 
                                     st.subheader(
                                         "📉 Objawy somatyczne i impulsywne zachowania"
@@ -678,8 +752,8 @@ if authentication_status:
                         if df_patient_day.empty:
                             st.info("Brak zapisów dla wybranego pacjenta.")
                         else:
-                            df_patient_day["Data i czas"] = pd.to_datetime(
-                                df_patient_day["Data i czas"], errors="coerce"
+                            df_patient_day["Data i czas"] = ensure_datetime(
+                                df_patient_day["Data i czas"]
                             )
                             df_patient_day = df_patient_day.dropna(subset=["Data i czas"])
 
@@ -812,10 +886,9 @@ if authentication_status:
                 submitted = st.form_submit_button("💾 Zapisz wpis")
 
             if submitted:
+                now = datetime.datetime.now()
                 new_row = {
-                    "Data i czas": datetime.datetime.now().strftime(
-                        "%Y-%m-%d %H:%M"
-                    ),
+                    "Data i czas": now.strftime("%Y-%m-%d %H:%M"),
                     "Nastrój (0-10)": nastrój,
                     "Poziom lęku/napięcia (0-10)": lęk,
                     "Objawy somatyczne": ", ".join(wybrane_objawy),
@@ -829,31 +902,141 @@ if authentication_status:
                     "Zachowania impulsywne": ", ".join(wybrane_impulsy),
                     "Uwagi": uwagi,
                 }
-                df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-                df.to_csv(user_file, index=False)
-                st.success("✅ Wpis dodany!")
+
+                existing_today = pd.DataFrame()
+                if not df.empty and "Data i czas" in df:
+                    df_with_dates = df.copy()
+                    df_with_dates["Data i czas"] = ensure_datetime(
+                        df_with_dates["Data i czas"]
+                    )
+                    mask_today = (
+                        df_with_dates["Data i czas"].dt.date == now.date()
+                    )
+                    existing_today = df_with_dates.loc[mask_today]
+
+                if not existing_today.empty:
+                    st.session_state["pending_entry"] = new_row
+                    st.session_state["pending_entry_date"] = now.date().isoformat()
+                    st.session_state["pending_entry_user"] = username
+                else:
+                    clear_pending_entry()
+                    df = pd.concat(
+                        [df, pd.DataFrame([new_row])], ignore_index=True
+                    )
+                    df.to_csv(user_file, index=False)
+                    st.success("✅ Wpis dodany!")
+
+        pending_entry = st.session_state.get("pending_entry")
+        pending_user = st.session_state.get("pending_entry_user")
+        pending_date_str = st.session_state.get("pending_entry_date")
+
+        if pending_entry and pending_user == username and pending_date_str:
+            try:
+                pending_date = datetime.date.fromisoformat(pending_date_str)
+            except ValueError:
+                clear_pending_entry()
+            else:
+                st.warning(
+                    "Wpis na dzisiejszą datę już istnieje. "
+                    "Czy chcesz usunąć poprzedni i zapisać nowy?"
+                )
+                confirm_col, cancel_col = st.columns(2)
+                if confirm_col.button(
+                    "Usuń poprzedni i zapisz nowy wpis",
+                    key=f"confirm_replace_{username}",
+                ):
+                    df_replacement = df.copy()
+                    if not df_replacement.empty and "Data i czas" in df_replacement:
+                        df_replacement["Data i czas"] = ensure_datetime(
+                            df_replacement["Data i czas"]
+                        )
+                        df_replacement = df_replacement.loc[
+                            df_replacement["Data i czas"].dt.date != pending_date
+                        ]
+                    df_replacement = pd.concat(
+                        [
+                            df_replacement,
+                            pd.DataFrame([pending_entry]),
+                        ],
+                        ignore_index=True,
+                    )
+                    df_replacement.to_csv(user_file, index=False)
+                    clear_pending_entry()
+                    st.success("Wpis został zaktualizowany.")
+                    st.rerun()
+                if cancel_col.button(
+                    "Anuluj zapis",
+                    key=f"cancel_pending_{username}",
+                ):
+                    clear_pending_entry()
+                    st.info("Nowy wpis nie został zapisany.")
+                    st.rerun()
+        elif pending_entry:
+            clear_pending_entry()
 
         with tab_history:
             st.subheader("Historia wpisów")
-            st.dataframe(df, use_container_width=True)
+            if df.empty:
+                st.info("Brak zapisanych wpisów.")
+            else:
+                st.dataframe(df, use_container_width=True)
 
-            st.markdown("### 📤 Eksport danych")
-            csv_data = df.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "⬇️ Pobierz CSV",
-                data=csv_data,
-                file_name=f"{username}_dziennik.csv",
-                mime="text/csv",
-            )
+                st.markdown("### 🗑 Usuń wpis")
+                user_timestamps = (
+                    ensure_datetime(df["Data i czas"])
+                    if "Data i czas" in df
+                    else pd.Series(
+                        pd.NaT, index=df.index, dtype="datetime64[ns]"
+                    )
+                )
+
+                def format_user_entry(idx: int) -> str:
+                    ts = user_timestamps.loc[idx]
+                    ts_display = (
+                        ts.strftime("%Y-%m-%d %H:%M")
+                        if not pd.isna(ts)
+                        else "Brak daty"
+                    )
+                    mood_display = (
+                        df.at[idx, "Nastrój (0-10)"]
+                        if "Nastrój (0-10)" in df
+                        else "–"
+                    )
+                    return f"{ts_display} · Nastrój: {mood_display}"
+
+                entry_to_delete_user = st.selectbox(
+                    "Wybierz wpis do usunięcia",
+                    options=list(df.index),
+                    format_func=format_user_entry,
+                    key=f"user_delete_option_{username}",
+                )
+
+                if st.button(
+                    "🗑 Usuń wybrany wpis",
+                    key=f"user_delete_button_{username}",
+                ):
+                    updated_df = df.drop(index=entry_to_delete_user).reset_index(
+                        drop=True
+                    )
+                    updated_df.to_csv(user_file, index=False)
+                    st.success("Wpis został usunięty.")
+                    st.rerun()
+
+                st.markdown("### 📤 Eksport danych")
+                csv_data = df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    "⬇️ Pobierz CSV",
+                    data=csv_data,
+                    file_name=f"{username}_dziennik.csv",
+                    mime="text/csv",
+                )
 
         with tab_charts:
             if df.empty:
                 st.info("Brak danych do wizualizacji.")
             else:
                 chart_df = df.copy()
-                chart_df["Data i czas"] = pd.to_datetime(
-                    chart_df["Data i czas"], errors="coerce"
-                )
+                chart_df["Data i czas"] = ensure_datetime(chart_df["Data i czas"])
                 chart_df = chart_df.dropna(subset=["Data i czas"])
 
                 if chart_df.empty:
@@ -1016,16 +1199,15 @@ if authentication_status:
                         plt.xticks(rotation=45)
                         st.pyplot(fig)
 
-                        numeric_sleep = pd.to_numeric(
-                            sleep_filtered["Długość snu (h)"], errors="coerce"
+                        numeric_sleep = get_numeric_series(
+                            sleep_filtered, "Długość snu (h)"
                         )
-                        numeric_wakeups = pd.to_numeric(
-                            sleep_filtered["Liczba wybudzeń w nocy"],
-                            errors="coerce",
+                        numeric_wakeups = get_numeric_series(
+                            sleep_filtered, "Liczba wybudzeń w nocy"
                         )
-                        numeric_quality = pd.to_numeric(
-                            sleep_filtered["Subiektywna jakość snu (0-10)"],
-                            errors="coerce",
+                        numeric_quality = get_numeric_series(
+                            sleep_filtered,
+                            "Subiektywna jakość snu (0-10)",
                         )
 
                         avg_sleep = numeric_sleep.dropna().mean()
@@ -1059,17 +1241,28 @@ if authentication_status:
                         )
 
                         st.markdown("### 📋 Dane snu")
-                        sleep_table = sleep_filtered[
-                            [
-                                "Data i czas",
-                                "Godzina zaśnięcia",
-                                "Godzina wybudzenia",
-                                "Liczba wybudzeń w nocy",
-                                "Subiektywna jakość snu (0-10)",
-                                "Długość snu (h)",
-                            ]
+                        sleep_columns = [
+                            "Data i czas",
+                            "Godzina zaśnięcia",
+                            "Godzina wybudzenia",
+                            "Liczba wybudzeń w nocy",
+                            "Subiektywna jakość snu (0-10)",
+                            "Długość snu (h)",
                         ]
-                        st.dataframe(sleep_table, use_container_width=True)
+                        available_sleep_columns = [
+                            column
+                            for column in sleep_columns
+                            if column in sleep_filtered
+                        ]
+                        if available_sleep_columns:
+                            sleep_table = sleep_filtered[available_sleep_columns]
+                            st.dataframe(
+                                sleep_table, use_container_width=True
+                            )
+                        else:
+                            st.info(
+                                "Brak szczegółowych danych o śnie w wybranym okresie."
+                            )
 
         with tab_day:
             st.subheader("📅 Dane za wybrany dzień")
@@ -1077,9 +1270,7 @@ if authentication_status:
                 st.info("Brak zapisanych wpisów.")
             else:
                 df_dates = df.copy()
-                df_dates["Data i czas"] = pd.to_datetime(
-                    df_dates["Data i czas"], errors="coerce"
-                )
+                df_dates["Data i czas"] = ensure_datetime(df_dates["Data i czas"])
                 df_dates = df_dates.dropna(subset=["Data i czas"])
 
                 if df_dates.empty:
