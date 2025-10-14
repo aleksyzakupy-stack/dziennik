@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import datetime
 import os
+from typing import Any, Dict
+
+import bcrypt
 import yaml
 from yaml.loader import SafeLoader
 import matplotlib.pyplot as plt
@@ -12,23 +15,79 @@ st.set_page_config(page_title="📓 Dziennik nastroju", layout="wide")
 
 # --- Файл пользователей ---
 USERS_FILE = "users.yaml"
-if not os.path.exists(USERS_FILE):
-    with open(USERS_FILE, "w") as f:
-        yaml.dump({"credentials": {"usernames": {}}}, f)
+DEFAULT_ADMIN_USERNAME = "Kasper"
+DEFAULT_ADMIN_NAME = "Lek. Aleksy Kasperowicz"
+DEFAULT_ADMIN_HASH = "$2b$12$ei/CshYLjrjCx5xp0vKZ1.saL2avwM2mel1ySKKrxXjAJy6C3sEQC"
 
-with open(USERS_FILE) as f:
-    config = yaml.load(f, Loader=SafeLoader)
 
-# --- Добавляем администратора вручную ---
-if "Kasper" not in config["credentials"]["usernames"]:
-    admin_hash = stauth.Hasher(["KlyxEanhybu1"]).generate()[0]
-    config["credentials"]["usernames"]["Kasper"] = {
-        "name": "Kasper Admin",
-        "password": admin_hash,
-        "role": "admin"
-    }
-    with open(USERS_FILE, "w") as f:
-        yaml.dump(config, f)
+def load_users_config() -> Dict[str, Any]:
+    """Ensure the users file exists and return its configuration."""
+
+    def _load_file() -> Dict[str, Any]:
+        if not os.path.exists(USERS_FILE):
+            return {"credentials": {"usernames": {}}}
+        with open(USERS_FILE) as fh:
+            data = yaml.load(fh, Loader=SafeLoader) or {}
+        return data
+
+    config_data: Dict[str, Any] = _load_file()
+    credentials: Dict[str, Any] = config_data.setdefault("credentials", {}).setdefault("usernames", {})
+
+    def get_secret(key: str):
+        try:
+            return st.secrets[key]
+        except Exception:
+            return os.getenv(key)
+
+    admin_username = get_secret("ADMIN_USERNAME")
+    admin_password = get_secret("ADMIN_PASSWORD")
+    admin_display_name = get_secret("ADMIN_DISPLAY_NAME")
+
+    updated = False
+
+    if admin_username and admin_password:
+        entry = credentials.setdefault(admin_username, {})
+        stored_hash = entry.get("password")
+        if (
+            stored_hash is None
+            or not bcrypt.checkpw(admin_password.encode(), stored_hash.encode())
+        ):
+            entry["password"] = stauth.Hasher([admin_password]).generate()[0]
+            updated = True
+        entry_name = admin_display_name or entry.get("name") or admin_username
+        if entry.get("name") != entry_name:
+            entry["name"] = entry_name
+            updated = True
+        if entry.get("role") != "admin":
+            entry["role"] = "admin"
+            updated = True
+    else:
+        entry = credentials.setdefault(
+            DEFAULT_ADMIN_USERNAME,
+            {
+                "name": DEFAULT_ADMIN_NAME,
+                "password": DEFAULT_ADMIN_HASH,
+                "role": "admin",
+            },
+        )
+        if entry.get("password") is None:
+            entry["password"] = DEFAULT_ADMIN_HASH
+            updated = True
+        if entry.get("role") != "admin":
+            entry["role"] = "admin"
+            updated = True
+        if not entry.get("name"):
+            entry["name"] = DEFAULT_ADMIN_NAME
+            updated = True
+
+    if updated or not os.path.exists(USERS_FILE):
+        with open(USERS_FILE, "w") as fh:
+            yaml.dump(config_data, fh)
+
+    return config_data
+
+
+config = load_users_config()
 
 # --- Авторизация ---
 authenticator = stauth.Authenticate(
@@ -38,20 +97,53 @@ authenticator = stauth.Authenticate(
     cookie_expiry_days=1
 )
 
-# --- Регистрация (только если не вошёл) ---
-if st.session_state.get("authentication_status") is None:
-    st.sidebar.subheader("🆕 Rejestracja")
-    with st.sidebar.form("register_form"):
-        new_name = st.text_input("Imię i nazwisko")
-        new_username = st.text_input("Login")
-        new_password = st.text_input("Hasło", type="password")
-        reg_submitted = st.form_submit_button("Zarejestruj")
+# --- Стандартные значения состояния ---
+st.session_state.setdefault("authentication_status", None)
+st.session_state.setdefault("name", None)
+st.session_state.setdefault("username", None)
+
+# --- Логин/регистрация ---
+if st.session_state.get("authentication_status") is not True:
+    st.title("📓 Dziennik nastroju")
+    st.markdown("Wybierz odpowiednią opcję, aby kontynuować.")
+
+    choice = st.radio(
+        "Co chcesz zrobić?",
+        ("🔐 Logowanie", "🆕 Rejestracja"),
+        horizontal=True
+    )
+
+    if choice == "🔐 Logowanie":
+        name, authentication_status, username = authenticator.login(
+            "Logowanie",
+            location="main"
+        )
+
+        if authentication_status:
+            st.session_state.update(
+                {
+                    "authentication_status": True,
+                    "name": name,
+                    "username": username
+                }
+            )
+            st.experimental_rerun()
+        elif authentication_status is False:
+            st.error("❌ Nieprawidłowy login lub hasło")
+        else:
+            st.warning("🔑 Wprowadź login i hasło")
+    else:
+        with st.form("register_form"):
+            new_name = st.text_input("Imię i pierwsze 3 litery nazwiska")
+            new_username = st.text_input("Login")
+            new_password = st.text_input("Hasło", type="password")
+            reg_submitted = st.form_submit_button("Zarejestruj")
 
         if reg_submitted:
             if new_username in config["credentials"]["usernames"]:
-                st.sidebar.error("❌ Taki login już istnieje")
+                st.error("❌ Taki login już istnieje")
             elif not new_name or not new_username or not new_password:
-                st.sidebar.error("⚠️ Wszystkie pola są wymagane")
+                st.error("⚠️ Wszystkie pola są wymagane")
             else:
                 hashed = stauth.Hasher([new_password]).generate()[0]
                 config["credentials"]["usernames"][new_username] = {
@@ -61,18 +153,28 @@ if st.session_state.get("authentication_status") is None:
                 }
                 with open(USERS_FILE, "w") as f:
                     yaml.dump(config, f)
-                st.sidebar.success("✅ Rejestracja udana! Możesz się zalogować.")
 
-# --- Логин ---
-name, authentication_status, username = authenticator.login("Login", "sidebar")
+                st.session_state.update(
+                    {
+                        "authentication_status": True,
+                        "name": new_name,
+                        "username": new_username,
+                        "auto_login_message": "✅ Rejestracja udana! Zalogowano automatycznie."
+                    }
+                )
+                st.experimental_rerun()
 
-if authentication_status == False:
-    st.error("❌ Nieprawidłowy login lub hasło")
-if authentication_status == None:
-    st.warning("🔑 Wprowadź login i hasło")
+# --- Aktualne wartości z sesji ---
+authentication_status = st.session_state.get("authentication_status")
+name = st.session_state.get("name")
+username = st.session_state.get("username")
 
 # --- Если вошёл ---
 if authentication_status:
+
+    auto_message = st.session_state.pop("auto_login_message", None)
+    if auto_message:
+        st.success(auto_message)
 
     authenticator.logout("🚪 Wyloguj", "sidebar")
     st.sidebar.success(f"Zalogowano: {name}")
@@ -115,6 +217,29 @@ if authentication_status:
     }
     AKTYWNOSCI = {"p": "praca", "n": "nauka", "d": "obowiązki domowe", "wf": "aktywność fizyczna"}
     IMPULSY = {"oż": "kompulsywne objadanie się", "su": "samouszkodzenia", "z": "zakupy kompulsywne", "h": "hazard", "s": "seks ryzykowny"}
+
+    def prepare_counts(column: pd.Series) -> pd.Series:
+        tokens = (
+            column.dropna()
+            .astype(str)
+            .str.split(r",\s*")
+            .explode()
+            .str.strip()
+        )
+        if tokens.empty:
+            return pd.Series(dtype="int64")
+        tokens = tokens[tokens != ""]
+        if tokens.empty:
+            return pd.Series(dtype="int64")
+        return tokens.value_counts().sort_values(ascending=False)
+
+    def render_counts(title: str, counts: pd.Series, container) -> None:
+        container.markdown(f"**{title}**")
+        if counts.empty:
+            container.write("Brak danych")
+            return
+        for item, count in counts.items():
+            container.write(f"- **{item}** – {count}")
 
     # --- Layout вкладок ---
     tabs = ["✍️ Formularz", "📑 Historia", "📈 Wykresy"]
@@ -235,6 +360,13 @@ if authentication_status:
             plt.xticks(rotation=45)
 
             st.pyplot(fig)
+
+            # --- Statystyki aktywności i objawów ---
+            st.subheader("📊 Przegląd aktywności i objawów")
+            col1, col2, col3 = st.columns(3)
+            render_counts("Objawy somatyczne", prepare_counts(df["Objawy somatyczne"]), col1)
+            render_counts("Wykonane aktywności", prepare_counts(df["Wykonane aktywności"]), col2)
+            render_counts("Zachowania impulsywne", prepare_counts(df["Zachowania impulsywne"]), col3)
 
         else:
             st.info("Brak danych do wizualizacji.")
@@ -404,9 +536,33 @@ if authentication_status:
                             f"{avg_quality:.1f}/10" if not pd.isna(avg_quality) else "–"
                         )
 
+                        st.markdown("### 📋 Aktywności i objawy")
+                        c1, c2, c3 = st.columns(3)
+                        render_counts(
+                            "Objawy somatyczne",
+                            prepare_counts(df_patient["Objawy somatyczne"]),
+                            c1,
+                        )
+                        render_counts(
+                            "Wykonane aktywności",
+                            prepare_counts(df_patient["Wykonane aktywności"]),
+                            c2,
+                        )
+                        render_counts(
+                            "Zachowania impulsywne",
+                            prepare_counts(df_patient["Zachowania impulsywne"]),
+                            c3,
+                        )
+
 
 
                     else:
                         st.info("Brak zapisanych wpisów dla tego pacjenta.")
                 else:
                     st.info("Brak danych dla tego pacjenta.")
+
+st.markdown("---")
+st.markdown(
+    "**Lek. Aleksy Kasperowicz** · specjalista psychiatra · "
+    "[www.drkasperowicz.pl](https://www.drkasperowicz.pl)"
+)
