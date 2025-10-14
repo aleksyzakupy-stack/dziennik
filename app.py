@@ -3,24 +3,13 @@ import streamlit as st
 import pandas as pd
 import datetime
 import os
-import unicodedata
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict
 
 import bcrypt
 import yaml
 from yaml.loader import SafeLoader
 import matplotlib.pyplot as plt
 import streamlit_authenticator as stauth
-
-try:
-    from fpdf import FPDF
-    try:  # pragma: no cover - enums introduced in newer fpdf2 versions
-        from fpdf.enums import XPos, YPos
-    except Exception:  # pragma: no cover - gracefully fall back when missing
-        XPos = YPos = None
-except ImportError:  # pragma: no cover - fallback when library missing
-    FPDF = None
-    XPos = YPos = None
 
 # --- Конфигурация страницы ---
 st.set_page_config(page_title="📓 Dziennik nastroju", layout="wide")
@@ -390,180 +379,6 @@ if authentication_status:
             working.loc[working["Długość snu (h)"] < 0, "Długość snu (h)"] += 24
         return working
 
-    def _pdf_safe_text(value: Any) -> str:
-        if value is None:
-            return ""
-        if not isinstance(value, str):
-            value = str(value)
-        try:
-            value.encode("latin-1")
-            return value
-        except UnicodeEncodeError:
-            normalized = unicodedata.normalize("NFKD", value)
-            return normalized.encode("latin-1", "ignore").decode("latin-1")
-
-    def _pdf_next_line_kwargs() -> Dict[str, Any]:
-        if XPos is not None and YPos is not None:
-            return {"new_x": XPos.LMARGIN, "new_y": YPos.NEXT}
-        return {"ln": True}
-
-    def _pdf_cell_line(pdf: "FPDF", width: int, height: int, text: str) -> None:
-        pdf.cell(width, height, text, **_pdf_next_line_kwargs())
-
-    def create_patient_pdf(
-        patient_name: str,
-        df_source: pd.DataFrame,
-        selected_range: Optional[Tuple[datetime.date, datetime.date]] = None,
-    ) -> Optional[bytes]:
-        if FPDF is None or df_source.empty:
-            return None
-
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-
-        pdf.set_font("Helvetica", "B", 16)
-        _pdf_cell_line(pdf, 0, 10, _pdf_safe_text(f"Raport pacjenta: {patient_name}"))
-
-        pdf.set_font("Helvetica", "", 12)
-        if selected_range:
-            start_date, end_date = selected_range
-            _pdf_cell_line(
-                pdf,
-                0,
-                8,
-                _pdf_safe_text(f"Zakres danych: {start_date} - {end_date}"),
-            )
-        else:
-            _pdf_cell_line(
-                pdf,
-                0,
-                8,
-                _pdf_safe_text("Zakres danych: wszystkie dostępne wpisy"),
-            )
-        _pdf_cell_line(
-            pdf,
-            0,
-            8,
-            _pdf_safe_text(f"Liczba wpisów: {len(df_source)}"),
-        )
-        _pdf_cell_line(
-            pdf,
-            0,
-            8,
-            _pdf_safe_text(
-                f"Wygenerowano: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            ),
-        )
-
-        def _mean(series: pd.Series) -> Optional[float]:
-            numeric = pd.to_numeric(series, errors="coerce")
-            numeric = numeric.dropna()
-            if numeric.empty:
-                return None
-            return float(numeric.mean())
-
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 12)
-        _pdf_cell_line(pdf, 0, 8, _pdf_safe_text("Średnie parametry"))
-
-        pdf.set_font("Helvetica", "", 12)
-        averages = {
-            "Nastrój (0-10)": "Średni nastrój",
-            "Poziom lęku/napięcia (0-10)": "Średni poziom lęku",
-            "Energia/motywacja (0-10)": "Średnia energia",
-            "Apetyt (0-10)": "Średni apetyt",
-        }
-
-        for column, label in averages.items():
-            if column in df_source:
-                value = _mean(df_source[column])
-                if value is not None:
-                    _pdf_cell_line(
-                        pdf,
-                        0,
-                        8,
-                        _pdf_safe_text(f"- {label}: {value:.1f}/10"),
-                    )
-
-        sleep_df = prepare_sleep_dataframe(df_source)
-        if not sleep_df.empty:
-            avg_sleep = _mean(sleep_df["Długość snu (h)"])
-            avg_wakeups = _mean(sleep_df["Liczba wybudzeń w nocy"])
-            avg_quality = _mean(sleep_df["Subiektywna jakość snu (0-10)"])
-            total_wakeups = pd.to_numeric(
-                sleep_df["Liczba wybudzeń w nocy"], errors="coerce"
-            ).sum()
-
-            _pdf_cell_line(
-                pdf,
-                0,
-                8,
-                _pdf_safe_text(
-                    "- Średnia długość snu: "
-                    + (f"{avg_sleep:.1f} h" if avg_sleep is not None else "brak danych")
-                ),
-            )
-            _pdf_cell_line(
-                pdf,
-                0,
-                8,
-                _pdf_safe_text(
-                    "- Średnia jakość snu: "
-                    + (f"{avg_quality:.1f}/10" if avg_quality is not None else "brak danych")
-                ),
-            )
-            _pdf_cell_line(
-                pdf,
-                0,
-                8,
-                _pdf_safe_text(
-                    "- Średnia liczba wybudzeń: "
-                    + (f"{avg_wakeups:.1f}" if avg_wakeups is not None else "brak danych")
-                ),
-            )
-            _pdf_cell_line(
-                pdf,
-                0,
-                8,
-                _pdf_safe_text(f"- Łączna liczba wybudzeń: {int(total_wakeups)}"),
-            )
-
-        pdf.ln(4)
-        pdf.set_font("Helvetica", "B", 12)
-        _pdf_cell_line(pdf, 0, 8, _pdf_safe_text("Najczęstsze objawy somatyczne"))
-        pdf.set_font("Helvetica", "", 12)
-        symptoms = prepare_counts(df_source.get("Objawy somatyczne", pd.Series(dtype="object")))
-        if symptoms.empty:
-            _pdf_cell_line(pdf, 0, 8, _pdf_safe_text("- Brak danych"))
-        else:
-            for item, count in symptoms.head(5).items():
-                _pdf_cell_line(
-                    pdf,
-                    0,
-                    8,
-                    _pdf_safe_text(f"- {item}: {count}"),
-                )
-
-        pdf.ln(2)
-        pdf.set_font("Helvetica", "B", 12)
-        _pdf_cell_line(pdf, 0, 8, _pdf_safe_text("Najczęstsze zachowania impulsywne"))
-        pdf.set_font("Helvetica", "", 12)
-        impulses = prepare_counts(df_source.get("Zachowania impulsywne", pd.Series(dtype="object")))
-        if impulses.empty:
-            _pdf_cell_line(pdf, 0, 8, _pdf_safe_text("- Brak danych"))
-        else:
-            for item, count in impulses.head(5).items():
-                _pdf_cell_line(
-                    pdf,
-                    0,
-                    8,
-                    _pdf_safe_text(f"- {item}: {count}"),
-                )
-
-        pdf_output = pdf.output(dest="S").encode("latin1")
-        return pdf_output
-
     if role == "admin":
         st.title("👨‍⚕️ Panel admina")
 
@@ -653,31 +468,6 @@ if authentication_status:
                                     )
                                 else:
                                     df_patient_filtered = df_patient_time
-
-                                pdf_source = (
-                                    df_patient_filtered
-                                    if not df_patient_filtered.empty
-                                    else df_patient_time
-                                )
-                                pdf_range = (
-                                    date_range
-                                    if date_range and not df_patient_filtered.empty
-                                    else None
-                                )
-                                pdf_bytes = create_patient_pdf(
-                                    selected_user_range, pdf_source, pdf_range
-                                )
-                                if pdf_bytes:
-                                    st.download_button(
-                                        "📄 Pobierz raport PDF",
-                                        data=pdf_bytes,
-                                        file_name=f"{selected_user_range}_raport.pdf",
-                                        mime="application/pdf",
-                                    )
-                                elif FPDF is None:
-                                    st.info(
-                                        "📄 Instalacja pakietu `fpdf2` umożliwi generowanie raportów PDF."
-                                    )
 
                                 if df_patient_filtered.empty:
                                     st.info("Brak danych pacjenta w wybranym okresie.")
