@@ -3,7 +3,6 @@ import streamlit as st
 import pandas as pd
 import datetime
 import os
-import unicodedata
 from typing import Any, Dict, Optional, Tuple
 
 import bcrypt
@@ -385,18 +384,6 @@ if authentication_status:
             working.loc[working["Długość snu (h)"] < 0, "Długość snu (h)"] += 24
         return working
 
-    def _pdf_safe_text(value: Any) -> str:
-        if value is None:
-            return ""
-        if not isinstance(value, str):
-            value = str(value)
-        try:
-            value.encode("latin-1")
-            return value
-        except UnicodeEncodeError:
-            normalized = unicodedata.normalize("NFKD", value)
-            return normalized.encode("latin-1", "ignore").decode("latin-1")
-
     def create_patient_pdf(
         patient_name: str,
         df_source: pd.DataFrame,
@@ -410,31 +397,19 @@ if authentication_status:
         pdf.add_page()
 
         pdf.set_font("Helvetica", "B", 16)
-        pdf.cell(0, 10, _pdf_safe_text(f"Raport pacjenta: {patient_name}"), ln=True)
+        pdf.cell(0, 10, f"Raport pacjenta: {patient_name}", ln=True)
 
         pdf.set_font("Helvetica", "", 12)
         if selected_range:
             start_date, end_date = selected_range
-            pdf.cell(
-                0,
-                8,
-                _pdf_safe_text(f"Zakres danych: {start_date} - {end_date}"),
-                ln=True,
-            )
+            pdf.cell(0, 8, f"Zakres danych: {start_date} – {end_date}", ln=True)
         else:
-            pdf.cell(
-                0,
-                8,
-                _pdf_safe_text("Zakres danych: wszystkie dostępne wpisy"),
-                ln=True,
-            )
-        pdf.cell(0, 8, _pdf_safe_text(f"Liczba wpisów: {len(df_source)}"), ln=True)
+            pdf.cell(0, 8, "Zakres danych: wszystkie dostępne wpisy", ln=True)
+        pdf.cell(0, 8, f"Liczba wpisów: {len(df_source)}", ln=True)
         pdf.cell(
             0,
             8,
-            _pdf_safe_text(
-                f"Wygenerowano: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}"
-            ),
+            f"Wygenerowano: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}",
             ln=True,
         )
 
@@ -447,7 +422,7 @@ if authentication_status:
 
         pdf.ln(4)
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, _pdf_safe_text("Średnie parametry"), ln=True)
+        pdf.cell(0, 8, "Średnie parametry", ln=True)
 
         pdf.set_font("Helvetica", "", 12)
         averages = {
@@ -461,7 +436,7 @@ if authentication_status:
             if column in df_source:
                 value = _mean(df_source[column])
                 if value is not None:
-                    pdf.cell(0, 8, _pdf_safe_text(f"- {label}: {value:.1f}/10"), ln=True)
+                    pdf.cell(0, 8, f"- {label}: {value:.1f}/10", ln=True)
 
         sleep_df = prepare_sleep_dataframe(df_source)
         if not sleep_df.empty:
@@ -472,61 +447,32 @@ if authentication_status:
                 sleep_df["Liczba wybudzeń w nocy"], errors="coerce"
             ).sum()
 
-            pdf.cell(
-                0,
-                8,
-                _pdf_safe_text(
-                    "- Średnia długość snu: "
-                    + (f"{avg_sleep:.1f} h" if avg_sleep is not None else "brak danych")
-                ),
-                ln=True,
-            )
-            pdf.cell(
-                0,
-                8,
-                _pdf_safe_text(
-                    "- Średnia jakość snu: "
-                    + (f"{avg_quality:.1f}/10" if avg_quality is not None else "brak danych")
-                ),
-                ln=True,
-            )
-            pdf.cell(
-                0,
-                8,
-                _pdf_safe_text(
-                    "- Średnia liczba wybudzeń: "
-                    + (f"{avg_wakeups:.1f}" if avg_wakeups is not None else "brak danych")
-                ),
-                ln=True,
-            )
-            pdf.cell(
-                0,
-                8,
-                _pdf_safe_text(f"- Łączna liczba wybudzeń: {int(total_wakeups)}"),
-                ln=True,
-            )
+            pdf.cell(0, 8, "- Średnia długość snu: " + (f"{avg_sleep:.1f} h" if avg_sleep is not None else "brak danych"), ln=True)
+            pdf.cell(0, 8, "- Średnia jakość snu: " + (f"{avg_quality:.1f}/10" if avg_quality is not None else "brak danych"), ln=True)
+            pdf.cell(0, 8, "- Średnia liczba wybudzeń: " + (f"{avg_wakeups:.1f}" if avg_wakeups is not None else "brak danych"), ln=True)
+            pdf.cell(0, 8, f"- Łączna liczba wybudzeń: {int(total_wakeups)}", ln=True)
 
         pdf.ln(4)
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, _pdf_safe_text("Najczęstsze objawy somatyczne"), ln=True)
+        pdf.cell(0, 8, "Najczęstsze objawy somatyczne", ln=True)
         pdf.set_font("Helvetica", "", 12)
         symptoms = prepare_counts(df_source.get("Objawy somatyczne", pd.Series(dtype="object")))
         if symptoms.empty:
-            pdf.cell(0, 8, _pdf_safe_text("- Brak danych"), ln=True)
+            pdf.cell(0, 8, "- Brak danych", ln=True)
         else:
             for item, count in symptoms.head(5).items():
-                pdf.cell(0, 8, _pdf_safe_text(f"- {item}: {count}"), ln=True)
+                pdf.cell(0, 8, f"- {item}: {count}", ln=True)
 
         pdf.ln(2)
         pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(0, 8, _pdf_safe_text("Najczęstsze zachowania impulsywne"), ln=True)
+        pdf.cell(0, 8, "Najczęstsze zachowania impulsywne", ln=True)
         pdf.set_font("Helvetica", "", 12)
         impulses = prepare_counts(df_source.get("Zachowania impulsywne", pd.Series(dtype="object")))
         if impulses.empty:
-            pdf.cell(0, 8, _pdf_safe_text("- Brak danych"), ln=True)
+            pdf.cell(0, 8, "- Brak danych", ln=True)
         else:
             for item, count in impulses.head(5).items():
-                pdf.cell(0, 8, _pdf_safe_text(f"- {item}: {count}"), ln=True)
+                pdf.cell(0, 8, f"- {item}: {count}", ln=True)
 
         pdf_output = pdf.output(dest="S").encode("latin1")
         return pdf_output
