@@ -451,6 +451,13 @@ if authentication_status:
                 render_counts("Wykonane aktywności", prepare_counts(df_filtered["Wykonane aktywności"]), col2)
                 render_counts("Zachowania impulsywne", prepare_counts(df_filtered["Zachowania impulsywne"]), col3)
 
+            # --- Statystyki aktywności i objawów ---
+            st.subheader("📊 Przegląd aktywności i objawów")
+            col1, col2, col3 = st.columns(3)
+            render_counts("Objawy somatyczne", prepare_counts(df["Objawy somatyczne"]), col1)
+            render_counts("Wykonane aktywności", prepare_counts(df["Wykonane aktywności"]), col2)
+            render_counts("Zachowania impulsywne", prepare_counts(df["Zachowania impulsywne"]), col3)
+
         else:
             st.info("Brak danych do wizualizacji.")
 
@@ -693,6 +700,24 @@ if authentication_status:
                                 prepare_counts(df_patient_filtered["Zachowania impulsywne"]),
                                 c3,
                             )
+
+                        st.markdown("### 📋 Aktywności i objawy")
+                        c1, c2, c3 = st.columns(3)
+                        render_counts(
+                            "Objawy somatyczne",
+                            prepare_counts(df_patient["Objawy somatyczne"]),
+                            c1,
+                        )
+                        render_counts(
+                            "Wykonane aktywności",
+                            prepare_counts(df_patient["Wykonane aktywności"]),
+                            c2,
+                        )
+                        render_counts(
+                            "Zachowania impulsywne",
+                            prepare_counts(df_patient["Zachowania impulsywne"]),
+                            c3,
+                        )
 
 
 
