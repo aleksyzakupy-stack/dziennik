@@ -11,7 +11,6 @@ from google_sheets import (
     GoogleSheetsQuotaError,
     append_user_entry,
     delete_user_entry,
-    filter_entries_for_user,
     load_all_entries,
     load_user_entries,
     load_users_config,
@@ -174,7 +173,7 @@ if authentication_status:
         st.session_state["username"] = None
         st.session_state["logout"] = True
         st.rerun()
-    role = user_record.get("role", "pacjent")
+    role = str(user_record.get("role", "pacjent")).strip().lower()
 
     # --- Dane użytkownika z Google Sheets ---
     df = pd.DataFrame()
@@ -333,36 +332,67 @@ if authentication_status:
         st.title("👨‍⚕️ Panel admina")
 
         try:
-            all_entries = load_all_entries()
+            admin_config = load_users_config()
+            entries_df = load_all_entries()
         except GoogleSheetsError as exc:
             st.error(str(exc))
             st.stop()
 
-        configured_users = config["credentials"]["usernames"]
-        admin_usernames = {
-            user_name
+        configured_users = admin_config["credentials"]["usernames"]
+        users_df = pd.DataFrame(
+            [
+                {
+                    "username": user_name,
+                    "name": user_data.get("name", ""),
+                    "role": user_data.get("role", "pacjent"),
+                }
+                for user_name, user_data in configured_users.items()
+            ]
+        )
+        st.write("DEBUG role:", role)
+        st.write("DEBUG username:", username)
+        st.write("DEBUG users count:", len(users_df))
+        st.write("DEBUG entries count:", len(entries_df))
+
+        usernames_from_users = {
+            str(user_name).strip()
             for user_name, user_data in configured_users.items()
-            if user_data.get("role") == "admin"
+            if str(user_name).strip()
+            and str(user_data.get("role", "pacjent")).strip().lower() != "admin"
         }
-        registered_patients = {
-            user_name
-            for user_name, user_data in configured_users.items()
-            if user_data.get("role", "pacjent") != "admin"
-        }
-        entry_patients = set()
-        if not all_entries.empty and "username" in all_entries:
-            entry_patients = {
+        usernames_from_entries = set()
+        if not entries_df.empty and "username" in entries_df:
+            usernames_from_entries = {
                 str(user_name).strip()
-                for user_name in all_entries["username"].dropna()
+                for user_name in entries_df["username"].dropna()
                 if str(user_name).strip()
             }
-        patients = sorted((registered_patients | entry_patients) - admin_usernames)
+        list_of_usernames = sorted(usernames_from_users | usernames_from_entries)
+        patients = list_of_usernames
 
         def load_patient_dataframe(patient_username: str):
-            return filter_entries_for_user(all_entries, patient_username)
+            if entries_df.empty or "username" not in entries_df:
+                return pd.DataFrame(
+                    columns=[
+                        column
+                        for column in entries_df.columns.tolist()
+                        if column != "username"
+                    ]
+                )
+            df_patient = entries_df.loc[
+                entries_df["username"].fillna("").astype(str).str.strip()
+                == patient_username
+            ].copy()
+            if "username" in df_patient:
+                df_patient = df_patient.drop(columns=["username"])
+            return df_patient.reset_index(drop=True)
+
+        if entries_df.empty:
+            st.info("Brak wpisów pacjentów")
 
         if not patients:
-            st.info("Brak pacjentów do wyświetlenia.")
+            if not entries_df.empty:
+                st.info("Brak pacjentów do wyświetlenia.")
         else:
             tab_range, tab_day = st.tabs(["📈 Pacjent / zakres", "🗓 Pacjent / dzień"])
 
@@ -373,12 +403,12 @@ if authentication_status:
                     key="admin_range_patient",
                 )
 
-                if selected_user_range:
-                    df_patient = load_patient_dataframe(selected_user_range)
-                    if df_patient is not None:
-                        if df_patient.empty:
-                            st.info("Brak zapisów dla wybranego pacjenta.")
-                        else:
+                selected_user = selected_user_range
+                if selected_user:
+                    df_patient = load_patient_dataframe(selected_user)
+                    if df_patient.empty:
+                        st.info("Brak wpisów dla wybranego pacjenta.")
+                    else:
                             st.markdown("### 📄 Wszystkie wpisy")
                             st.dataframe(df_patient, use_container_width=True)
 
@@ -702,9 +732,6 @@ if authentication_status:
                                         ),
                                         c3,
                                     )
-                    else:
-                        st.info("Brak danych dla wskazanego pacjenta.")
-
             with tab_day:
                 selected_user_day = st.selectbox(
                     "Wybierz pacjenta",
@@ -712,12 +739,12 @@ if authentication_status:
                     key="admin_day_patient",
                 )
 
-                if selected_user_day:
-                    df_patient_day = load_patient_dataframe(selected_user_day)
-                    if df_patient_day is not None:
-                        if df_patient_day.empty:
-                            st.info("Brak zapisów dla wybranego pacjenta.")
-                        else:
+                selected_user = selected_user_day
+                if selected_user:
+                    df_patient_day = load_patient_dataframe(selected_user)
+                    if df_patient_day.empty:
+                        st.info("Brak wpisów dla wybranego pacjenta.")
+                    else:
                             df_patient_day["Data i czas"] = ensure_datetime(
                                 df_patient_day["Data i czas"]
                             )
@@ -806,8 +833,6 @@ if authentication_status:
                                         ),
                                         d3,
                                     )
-                    else:
-                        st.info("Brak danych dla wskazanego pacjenta.")
     else:
         user_tabs = [
             "✍️ Formularz",
