@@ -60,7 +60,36 @@ class GoogleSheetsHeaderError(GoogleSheetsError):
     """Raised when a worksheet has unexpected headers."""
 
 
+class GoogleSheetsQuotaError(GoogleSheetsError):
+    """Raised when Google Sheets API quota is exceeded."""
+
+
+def _is_quota_error(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    error = getattr(exc, "error", None)
+    error_status = ""
+    if isinstance(error, dict):
+        error_status = str(error.get("status", ""))
+        status_code = status_code or error.get("code")
+
+    message = str(exc)
+    return (
+        status_code == 429
+        or "429" in message
+        or "quota" in message.lower()
+        or "RESOURCE_EXHAUSTED" in error_status
+        or "RESOURCE_EXHAUSTED" in message
+    )
+
+
 def _api_error_message(action: str, exc: Exception) -> GoogleSheetsError:
+    if _is_quota_error(exc):
+        return GoogleSheetsQuotaError(
+            "Przekroczono limit Google Sheets API dla odczytów/zapisów. "
+            "Odczekaj 1-2 minuty i odśwież aplikację."
+        )
+
     return GoogleSheetsError(
         f"Google Sheets API zwróciło błąd podczas operacji: {action}. "
         f"Szczegóły: {exc}"
@@ -162,6 +191,7 @@ def get_spreadsheet():
         raise _api_error_message("otwieranie arkusza", exc)
 
 
+@st.cache_resource(show_spinner=False)
 def get_worksheet(sheet_name: str):
     try:
         return get_spreadsheet().worksheet(sheet_name)
@@ -172,6 +202,11 @@ def get_worksheet(sheet_name: str):
 
 
 def ensure_worksheet(sheet_name: str, headers: Sequence[str]):
+    return _ensure_worksheet_cached(sheet_name, tuple(headers))
+
+
+@st.cache_resource(show_spinner=False)
+def _ensure_worksheet_cached(sheet_name: str, headers: Tuple[str, ...]):
     try:
         spreadsheet = get_spreadsheet()
         try:
@@ -194,8 +229,9 @@ def ensure_worksheet(sheet_name: str, headers: Sequence[str]):
             worksheet.append_row(list(headers), value_input_option="RAW")
             return worksheet
 
-        if current_headers != list(headers):
-            expected = ", ".join(headers)
+        expected_headers = list(headers)
+        if current_headers != expected_headers:
+            expected = ", ".join(expected_headers)
             found = ", ".join(current_headers)
             raise GoogleSheetsHeaderError(
                 f'Worksheet "{sheet_name}" ma nieprawidłowe nagłówki. '
@@ -209,6 +245,7 @@ def ensure_worksheet(sheet_name: str, headers: Sequence[str]):
         raise _api_error_message(f'przygotowanie worksheet "{sheet_name}"', exc)
 
 
+@st.cache_data(ttl=60)
 def load_users_config() -> Dict[str, Any]:
     worksheet = ensure_worksheet("users", USERS_HEADERS)
     try:
@@ -272,11 +309,11 @@ def save_users_config(config: Dict[str, Any]) -> None:
             values=rows,
             value_input_option="RAW",
         )
-        existing_rows = len(worksheet.get_all_values())
-        if existing_rows > len(rows):
-            worksheet.batch_clear([f"A{len(rows) + 1}:D{existing_rows}"])
+        if worksheet.row_count > len(rows):
+            worksheet.batch_clear([f"A{len(rows) + 1}:D{worksheet.row_count}"])
     except APIError as exc:
         raise _api_error_message('zapis worksheet "users"', exc)
+    st.cache_data.clear()
 
 
 def _normalize_entry_value(value: Any) -> Any:
@@ -327,21 +364,24 @@ def _entries_dataframe(records: Iterable[Dict[str, Any]], include_username: bool
     return df.reindex(columns=ENTRY_DATA_HEADERS)
 
 
+def filter_entries_for_user(entries_df: pd.DataFrame, username: str) -> pd.DataFrame:
+    if entries_df.empty or "username" not in entries_df:
+        return pd.DataFrame(columns=ENTRY_DATA_HEADERS)
+
+    user_entries = entries_df.loc[
+        entries_df["username"].fillna("").astype(str).str.strip() == username
+    ].copy()
+    if "username" in user_entries:
+        user_entries = user_entries.drop(columns=["username"])
+    return user_entries.reindex(columns=ENTRY_DATA_HEADERS).reset_index(drop=True)
+
+
+@st.cache_data(ttl=60)
 def load_user_entries(username: str) -> pd.DataFrame:
-    worksheet = ensure_worksheet("entries", ENTRIES_HEADERS)
-    try:
-        records = worksheet.get_all_records()
-    except APIError as exc:
-        raise _api_error_message('odczyt worksheet "entries"', exc)
-
-    filtered_records = [
-        record
-        for record in records
-        if str(record.get("username", "")).strip() == username
-    ]
-    return _entries_dataframe(filtered_records, include_username=False)
+    return filter_entries_for_user(load_all_entries(), username)
 
 
+@st.cache_data(ttl=60)
 def load_all_entries() -> pd.DataFrame:
     worksheet = ensure_worksheet("entries", ENTRIES_HEADERS)
     try:
@@ -361,6 +401,7 @@ def append_user_entry(username: str, entry_dict: Dict[str, Any]) -> None:
         )
     except APIError as exc:
         raise _api_error_message('dopisywanie wpisu do worksheet "entries"', exc)
+    st.cache_data.clear()
 
 
 def _parse_entry_datetime(value: Any) -> Tuple[Optional[datetime.datetime], Optional[datetime.date]]:
@@ -420,6 +461,7 @@ def update_user_entry(username: str, entry_datetime: Any, entry_dict: Dict[str, 
 
         if not matched_rows:
             worksheet.append_row(new_row, value_input_option="RAW")
+            st.cache_data.clear()
             return
 
         if len(matched_rows) == 1 and not date_match:
@@ -429,6 +471,7 @@ def update_user_entry(username: str, entry_datetime: Any, entry_dict: Dict[str, 
                 values=[new_row],
                 value_input_option="RAW",
             )
+            st.cache_data.clear()
             return
 
         for row_number in sorted(matched_rows, reverse=True):
@@ -436,6 +479,7 @@ def update_user_entry(username: str, entry_datetime: Any, entry_dict: Dict[str, 
         worksheet.append_row(new_row, value_input_option="RAW")
     except APIError as exc:
         raise _api_error_message('aktualizacja wpisu w worksheet "entries"', exc)
+    st.cache_data.clear()
 
 
 def delete_user_entry(username: str, entry_datetime: Any) -> None:
@@ -451,3 +495,4 @@ def delete_user_entry(username: str, entry_datetime: Any) -> None:
             worksheet.delete_rows(row_number)
     except APIError as exc:
         raise _api_error_message('usuwanie wpisu z worksheet "entries"', exc)
+    st.cache_data.clear()

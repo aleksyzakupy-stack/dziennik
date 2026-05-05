@@ -8,8 +8,10 @@ import streamlit_authenticator as stauth
 
 from google_sheets import (
     GoogleSheetsError,
+    GoogleSheetsQuotaError,
     append_user_entry,
     delete_user_entry,
+    filter_entries_for_user,
     load_all_entries,
     load_user_entries,
     load_users_config,
@@ -23,6 +25,9 @@ st.set_page_config(page_title="📓 Dziennik nastroju", layout="wide")
 # --- Google Sheets backend ---
 try:
     config = load_users_config()
+except GoogleSheetsQuotaError as exc:
+    st.error(str(exc))
+    st.stop()
 except GoogleSheetsError as exc:
     st.error(str(exc))
     st.info(
@@ -172,11 +177,13 @@ if authentication_status:
     role = user_record.get("role", "pacjent")
 
     # --- Dane użytkownika z Google Sheets ---
-    try:
-        df = load_user_entries(username)
-    except GoogleSheetsError as exc:
-        st.error(str(exc))
-        st.stop()
+    df = pd.DataFrame()
+    if role != "admin":
+        try:
+            df = load_user_entries(username)
+        except GoogleSheetsError as exc:
+            st.error(str(exc))
+            st.stop()
 
     def ensure_datetime(series: pd.Series) -> pd.Series:
         return pd.to_datetime(series, errors="coerce")
@@ -352,11 +359,7 @@ if authentication_status:
         patients = sorted((registered_patients | entry_patients) - admin_usernames)
 
         def load_patient_dataframe(patient_username: str):
-            try:
-                return load_user_entries(patient_username)
-            except GoogleSheetsError as exc:
-                st.error(str(exc))
-                return None
+            return filter_entries_for_user(all_entries, patient_username)
 
         if not patients:
             st.info("Brak pacjentów do wyświetlenia.")
