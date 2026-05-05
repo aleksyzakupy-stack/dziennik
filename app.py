@@ -1,7 +1,5 @@
 import io
 import datetime
-import unicodedata
-from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -316,52 +314,6 @@ if authentication_status:
             return pd.Series(dtype="float64")
         return pd.to_numeric(df_input[column], errors="coerce")
 
-    def pdf_text(value: Any) -> str:
-        if value is None:
-            return ""
-        try:
-            if pd.isna(value):
-                return ""
-        except TypeError:
-            pass
-        text = str(value)
-        return (
-            unicodedata.normalize("NFKD", text)
-            .encode("latin-1", errors="ignore")
-            .decode("latin-1")
-        )
-
-    def build_pdf_export(df_export: pd.DataFrame, title: str) -> bytes:
-        from fpdf import FPDF
-
-        pdf = FPDF(orientation="L", unit="mm", format="A4")
-        pdf.set_auto_page_break(auto=True, margin=10)
-        pdf.add_page()
-        pdf.set_font("Helvetica", "B", 14)
-        pdf.cell(0, 8, pdf_text(title), new_x="LMARGIN", new_y="NEXT")
-        pdf.set_font("Helvetica", size=8)
-
-        if df_export.empty:
-            pdf.multi_cell(0, 5, "Brak danych.")
-        else:
-            for index, row in df_export.reset_index(drop=True).iterrows():
-                pdf.set_font("Helvetica", "B", 8)
-                pdf.multi_cell(0, 5, pdf_text(f"Wpis {index + 1}"))
-                pdf.set_font("Helvetica", size=8)
-                line = " | ".join(
-                    f"{pdf_text(column)}: {pdf_text(row[column])}"
-                    for column in df_export.columns
-                )
-                pdf.multi_cell(0, 5, line)
-                pdf.ln(1)
-
-        output = pdf.output(dest="S")
-        if isinstance(output, bytearray):
-            return bytes(output)
-        if isinstance(output, bytes):
-            return output
-        return str(output).encode("latin-1", errors="replace")
-
     def clear_pending_entry():
         for key in [
             "pending_entry",
@@ -450,21 +402,6 @@ if authentication_status:
                                     data=buffer.getvalue(),
                                     file_name=f"{selected_user_range}_dziennik.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                )
-
-                            try:
-                                pdf_data = build_pdf_export(
-                                    df_patient,
-                                    f"Dziennik nastroju - {selected_user_range}",
-                                )
-                            except ImportError:
-                                st.info("📎 Eksport do PDF wymaga pakietu `fpdf2`.")
-                            else:
-                                st.download_button(
-                                    "⬇️ Pobierz PDF",
-                                    data=pdf_data,
-                                    file_name=f"{selected_user_range}_dziennik.pdf",
-                                    mime="application/pdf",
                                 )
 
                             st.markdown("### 🗑 Usuń wpis pacjenta")
@@ -1067,21 +1004,6 @@ if authentication_status:
                         data=buffer.getvalue(),
                         file_name=f"{username}_dziennik.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    )
-
-                try:
-                    pdf_data = build_pdf_export(
-                        df,
-                        f"Dziennik nastroju - {username}",
-                    )
-                except ImportError:
-                    st.info("📎 Eksport do PDF wymaga pakietu `fpdf2`.")
-                else:
-                    st.download_button(
-                        "⬇️ Pobierz PDF",
-                        data=pdf_data,
-                        file_name=f"{username}_dziennik.pdf",
-                        mime="application/pdf",
                     )
 
         with tab_charts:
