@@ -1,0 +1,7 @@
+credentials.json
+.streamlit/secrets.toml
+data/
+users.yaml
+__pycache__/
+*.pyc
+.DS_Store
